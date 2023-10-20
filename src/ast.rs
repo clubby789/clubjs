@@ -1,4 +1,5 @@
 use crate::{
+    intern::Symbol,
     lex::{Keyword, Lexer, Literal, Token, TokenKind},
     HalfSpan, Span,
 };
@@ -12,10 +13,10 @@ pub struct Program {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Function {
     span: Span,
-    name: String,
-    params: Vec<String>,
+    name: Symbol,
+    params: Vec<Symbol>,
     defaults: Vec<Expression>,
-    rest: Option<String>,
+    rest: Option<Symbol>,
     body: Vec<Statement>,
 }
 
@@ -36,7 +37,7 @@ pub enum VariableKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariableDeclarator {
     span: Span,
-    name: String,
+    name: Symbol,
     init: Option<Expression>,
 }
 
@@ -53,9 +54,9 @@ pub enum StatementKind {
     Block(Vec<Statement>),
     Expression(Expression),
     If(Expression, Box<Statement>, Option<Box<Statement>>),
-    Labeled(String, Box<Statement>),
-    Break(Option<String>),
-    Continue(Option<String>),
+    Labeled(Symbol, Box<Statement>),
+    Break(Option<Symbol>),
+    Continue(Option<Symbol>),
     Switch(Expression, Vec<SwitchCase>),
     Return(Option<Expression>),
     Throw(Expression),
@@ -78,23 +79,23 @@ pub struct Expression {
 pub enum ExpressionKind {
     This,
     Array(Vec<Expression>),
-    Object(Vec<(String, Option<Expression>)>),
+    Object(Vec<(Symbol, Option<Expression>)>),
     Function {
-        name: Option<String>,
-        params: Vec<String>,
+        name: Option<Symbol>,
+        params: Vec<Symbol>,
         defaults: Vec<Expression>,
-        rest: Option<String>,
+        rest: Option<Symbol>,
         body: Vec<Statement>,
     },
     Arrow {
-        params: Vec<String>,
+        params: Vec<Symbol>,
         defaults: Vec<Expression>,
-        rest: Option<String>,
+        rest: Option<Symbol>,
         body: Vec<Statement>,
     },
     Unary(UnaryOperator, Box<Expression>),
     Binary(Box<Expression>, BinaryOperator, Box<Expression>),
-    Assignment(String, AssignmentOperator, Box<Expression>),
+    Assignment(Symbol, AssignmentOperator, Box<Expression>),
     /// the bool is true if the operator is a prefix
     Update(Box<Expression>, UpdateOperator, bool),
     Logical(Box<Expression>, LogicalOperator, Box<Expression>),
@@ -104,12 +105,12 @@ pub enum ExpressionKind {
     Member(Box<Expression>, MemberKey),
     Yield(Option<Box<Expression>>),
     Literal(crate::lex::Literal),
-    Identifier(String),
+    Identifier(Symbol),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MemberKey {
-    Static(String),
+    Static(Symbol),
     Computed(Box<Expression>),
 }
 
@@ -267,22 +268,17 @@ impl<'a> Parser<'a> {
         );
     }
 
-    fn eat_literal(&mut self) -> Option<Literal> {
-        if let TokenKind::Literal(lit) = self.token.kind().clone() {
-            self.advance();
-            Some(lit.clone())
-        } else {
-            None
-        }
+    fn intern(&self, token: &Token) -> Symbol {
+        Symbol::intern(token.source_string(self.src()))
     }
 
-    fn eat_ident(&mut self) -> Option<String> {
+    fn eat_ident(&mut self) -> Option<Symbol> {
         self.eat(&TokenKind::Ident)
-            .then(|| self.prev_token.source_string(self.src()).to_string())
+            .then(|| self.intern(&self.prev_token))
     }
 
     #[track_caller]
-    fn expect_ident(&mut self) -> String {
+    fn expect_ident(&mut self) -> Symbol {
         self.eat_ident().expect("expected an identifier")
     }
 
@@ -364,7 +360,7 @@ impl<'a> Parser<'a> {
                 .parse_statement()
                 .expect("label must be followed by a statement");
             assert_eq!(tokens.len(), 2);
-            let ident = tokens[1].source_string(self.src()).to_string();
+            let ident = Symbol::intern(tokens[1].source_string(self.src()));
             return Some(Statement {
                 span: span.finish(stmt.span.hi()),
                 kind: StatementKind::Labeled(ident, Box::new(stmt)),
@@ -598,7 +594,9 @@ impl<'a> Parser<'a> {
     fn parse_identifier(&mut self) -> Expression {
         Expression {
             span: self.prev_token.span(),
-            kind: ExpressionKind::Identifier(self.prev_token.source_string(self.src()).to_string()),
+            kind: ExpressionKind::Identifier(Symbol::intern(
+                self.prev_token.source_string(self.src()),
+            )),
         }
     }
 
