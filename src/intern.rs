@@ -5,7 +5,7 @@ use typed_arena::Arena;
 
 pub static INTERNER: Lazy<Mutex<Interner>> = Lazy::new(|| Mutex::new(Interner::new()));
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Symbol(usize);
 
 impl Symbol {
@@ -15,9 +15,10 @@ impl Symbol {
         };
         interner.strings.get(self.0).copied().unwrap_or("?")
     }
-    //pub fn as_str_specific<'a>(self, interner: &'a Interner) -> &'a str {
-    //    interner.strings.get(self.0).unwrap()
-    //}
+
+    pub fn intern(s: &str) -> Symbol {
+        INTERNER.lock().unwrap().intern(s)
+    }
 }
 
 impl Debug for Symbol {
@@ -46,7 +47,7 @@ impl<'a> Interner<'a> {
         // SAFETY: We will only hand out &'a string references which cannot be used
         // by the time the internet and therefore arena have been deallocated
         let s: &str = unsafe { std::mem::transmute(s) };
-        let sym = Symbol(s.len());
+        let sym = Symbol(self.strings.len());
         self.strings.push(s);
         self.names.insert(s, sym);
         sym

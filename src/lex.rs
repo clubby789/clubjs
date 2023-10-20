@@ -1,8 +1,8 @@
 use std::str::Chars;
 
-use crate::Span;
+use crate::{intern::Symbol, Span};
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum TokenKind {
     Ident,
     Keyword(Keyword),
@@ -35,10 +35,10 @@ pub enum TokenKind {
     Eof,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Literal {
     Integer(u128),
-    String(String),
+    String(Symbol),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,7 +208,7 @@ impl<'a> Lexer<'a> {
                 if !self.try_eat(c) {
                     panic!("unterminated string literal");
                 }
-                TokenKind::Literal(Literal::String(content))
+                TokenKind::Literal(Literal::String(Symbol::intern(&content)))
             }
 
             p => unreachable!("couldn't parse at `{p}`"),
