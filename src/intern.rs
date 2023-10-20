@@ -1,12 +1,28 @@
 use core::fmt;
 use once_cell::sync::Lazy;
-use std::{collections::HashMap, fmt::Debug, sync::Mutex};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display},
+    sync::Mutex,
+};
 use typed_arena::Arena;
 
 pub static INTERNER: Lazy<Mutex<Interner>> = Lazy::new(|| Mutex::new(Interner::new()));
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Symbol(usize);
+
+impl PartialOrd for Symbol {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Symbol {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
 
 impl Symbol {
     pub fn as_str(self) -> &'static str {
@@ -24,6 +40,12 @@ impl Symbol {
 impl Debug for Symbol {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt::Debug::fmt(self.as_str(), f)
+    }
+}
+
+impl Display for Symbol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.as_str(), f)
     }
 }
 
