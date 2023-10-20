@@ -1,4 +1,5 @@
 mod ast;
+mod intern;
 mod lex;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
