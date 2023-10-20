@@ -553,6 +553,7 @@ impl<'a> Parser<'a> {
             TokenKind::Slash => r!(_, Self::parse_binary, FACTOR),
             TokenKind::Period => r!(_, Self::parse_member, MEMBER),
             TokenKind::Ident => r!(Self::parse_identifier, _),
+            TokenKind::Keyword(Keyword::This) => r!(Self::parse_this, _),
             TokenKind::Literal(_) => r!(Self::parse_literal, _),
             TokenKind::LBracket => r!(Self::parse_array, Self::parse_member, MEMBER),
             TokenKind::LBrace => r!(Self::parse_object, _),
@@ -598,6 +599,13 @@ impl<'a> Parser<'a> {
         Expression {
             span: self.prev_token.span(),
             kind: ExpressionKind::Identifier(self.prev_token.source_string(self.src()).to_string()),
+        }
+    }
+
+    fn parse_this(&mut self) -> Expression {
+        Expression {
+            span: self.prev_token.span(),
+            kind: ExpressionKind::This,
         }
     }
 
