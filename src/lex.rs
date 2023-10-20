@@ -1,4 +1,6 @@
-use std::str::Chars;
+use std::{str::Chars, collections::HashMap};
+
+use once_cell::sync::Lazy;
 
 use crate::{intern::Symbol, Span};
 
@@ -61,31 +63,27 @@ pub enum Keyword {
     Yield,
 }
 
-fn string_to_kw(s: &str) -> Option<Keyword> {
+static KEYWORDS: Lazy<HashMap<&'static str, Keyword>> = Lazy::new(|| {
     use Keyword::*;
-    let kw = match s {
-        "function" => Function,
-        "return" => Return,
-        "if" => If,
-        "while" => While,
-        "for" => For,
-        "break" => Break,
-        "continue" => Continue,
-        "var" => Var,
-        "let" => Let,
-        "const" => Const,
-        "debugger" => Debugger,
-        "this" => This,
-        "typeof" => TypeOf,
-        "new" => New,
-        "yield" => Yield,
-        "else" => Else,
-        _ => {
-            return None;
-        }
-    };
-    Some(kw)
-}
+    [
+        ("function", Function),
+        ("return", Return),
+        ("if", If),
+        ("else", Else),
+        ("while", While),
+        ("for", For),
+        ("break", Break),
+        ("continue", Continue),
+        ("var", Var),
+        ("let", Let),
+        ("const", Const),
+        ("debugger", Debugger),
+        ("this", This),
+        ("typeof", TypeOf),
+        ("new", New),
+        ("yield", Yield)
+    ].into_iter().collect()
+});
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub struct Token {
@@ -197,7 +195,7 @@ impl<'a> Lexer<'a> {
                 while let Some(c) = self.try_eat_fn(|c| c.is_ascii_alphanumeric() || c == '_') {
                     ident.push(c);
                 }
-                string_to_kw(&ident).map_or(TokenKind::Ident, TokenKind::Keyword)
+                KEYWORDS.get(ident.as_str()).copied().map_or(TokenKind::Ident, TokenKind::Keyword)
             }
             c @ ('"' | '\'') => {
                 // TODO: handle escaped quotes
