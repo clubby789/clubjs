@@ -87,7 +87,7 @@ fn string_to_kw(s: &str) -> Option<Keyword> {
     Some(kw)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub struct Token {
     kind: TokenKind,
     span: Span,
@@ -102,8 +102,8 @@ impl Token {
         self.span
     }
 
-    pub fn kind(&self) -> &TokenKind {
-        &self.kind
+    pub fn kind(&self) -> TokenKind {
+        self.kind
     }
 }
 

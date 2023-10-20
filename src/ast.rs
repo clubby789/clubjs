@@ -1,6 +1,6 @@
 use crate::{
     intern::Symbol,
-    lex::{Keyword, Lexer, Literal, Token, TokenKind},
+    lex::{Keyword, Lexer, Token, TokenKind},
     HalfSpan, Span,
 };
 
@@ -230,7 +230,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Advances to the next token if the current token is 'kind'
-    fn eat(&mut self, kind: &TokenKind) -> bool {
+    fn eat(&mut self, kind: TokenKind) -> bool {
         if self.token.kind() == kind {
             self.advance();
             return true;
@@ -243,7 +243,7 @@ impl<'a> Parser<'a> {
     fn eat_many(&mut self, kinds: &[TokenKind]) -> Option<Vec<Token>> {
         let mut tmp = self.clone();
         let mut v = vec![];
-        for tok in kinds {
+        for &tok in kinds {
             if tmp.token.kind() == tok {
                 v.push(tmp.advance());
             } else {
@@ -255,12 +255,12 @@ impl<'a> Parser<'a> {
     }
 
     fn eat_keyword(&mut self, kw: Keyword) -> bool {
-        self.eat(&TokenKind::Keyword(kw))
+        self.eat(TokenKind::Keyword(kw))
     }
 
     /// Consumes a token of 'kind', panicking if this doesn't match
     #[track_caller]
-    fn expect(&mut self, kind: &TokenKind) {
+    fn expect(&mut self, kind: TokenKind) {
         assert!(
             self.eat(kind),
             "expected `{kind:?}`, found `{:?}`",
@@ -268,13 +268,13 @@ impl<'a> Parser<'a> {
         );
     }
 
-    fn intern(&self, token: &Token) -> Symbol {
+    fn intern(&self, token: Token) -> Symbol {
         Symbol::intern(token.source_string(self.src()))
     }
 
     fn eat_ident(&mut self) -> Option<Symbol> {
-        self.eat(&TokenKind::Ident)
-            .then(|| self.intern(&self.prev_token))
+        self.eat(TokenKind::Ident)
+            .then(|| self.intern(self.prev_token))
     }
 
     #[track_caller]
@@ -287,23 +287,23 @@ impl<'a> Parser<'a> {
             return None;
         }
         let span = HalfSpan(self.last_token_end());
-        if self.eat(&TokenKind::Semicolon) {
+        if self.eat(TokenKind::Semicolon) {
             return Some(Statement {
                 span: span.finish(self.last_token_end()),
                 kind: StatementKind::Empty,
             });
         }
         if self.eat_keyword(Keyword::Debugger) {
-            self.eat(&TokenKind::Semicolon);
+            self.eat(TokenKind::Semicolon);
             return Some(Statement {
                 span: span.finish(self.last_token_end()),
                 kind: StatementKind::Debugger,
             });
         }
 
-        if self.eat(&TokenKind::LBrace) {
+        if self.eat(TokenKind::LBrace) {
             let block = std::iter::from_fn(|| self.parse_statement()).collect();
-            self.expect(&TokenKind::RBrace);
+            self.expect(TokenKind::RBrace);
             return Some(Statement {
                 span: span.finish(self.last_token_end()),
                 kind: StatementKind::Block(block),
@@ -311,9 +311,9 @@ impl<'a> Parser<'a> {
         }
 
         if self.eat_keyword(Keyword::If) {
-            self.expect(&TokenKind::LParen);
+            self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
-            self.expect(&TokenKind::RParen);
+            self.expect(TokenKind::RParen);
             let content = self
                 .parse_statement()
                 .expect("if statements must have a block");
@@ -328,9 +328,9 @@ impl<'a> Parser<'a> {
         }
 
         if self.eat_keyword(Keyword::While) {
-            self.expect(&TokenKind::LParen);
+            self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
-            self.expect(&TokenKind::RParen);
+            self.expect(TokenKind::RParen);
             let content = self
                 .parse_statement()
                 .expect("while statements must have a block");
@@ -342,9 +342,9 @@ impl<'a> Parser<'a> {
         }
 
         if self.eat_keyword(Keyword::For) {
-            self.expect(&TokenKind::LParen);
+            self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
-            self.expect(&TokenKind::RParen);
+            self.expect(TokenKind::RParen);
             let content = self
                 .parse_statement()
                 .expect("while statements must have a block");
@@ -369,7 +369,7 @@ impl<'a> Parser<'a> {
 
         if self.eat_keyword(Keyword::Break) {
             let ident = self.eat_ident();
-            self.eat(&TokenKind::Semicolon);
+            self.eat(TokenKind::Semicolon);
             return Some(Statement {
                 span: span.finish(self.prev_token.span().hi()),
                 kind: StatementKind::Break(ident),
@@ -378,7 +378,7 @@ impl<'a> Parser<'a> {
 
         if self.eat_keyword(Keyword::Continue) {
             let ident = self.eat_ident();
-            self.eat(&TokenKind::Semicolon);
+            self.eat(TokenKind::Semicolon);
             return Some(Statement {
                 span: span.finish(self.prev_token.span().hi()),
                 kind: StatementKind::Continue(ident),
@@ -387,7 +387,7 @@ impl<'a> Parser<'a> {
 
         if self.eat_keyword(Keyword::Return) {
             let expr = self.try_parse_expression();
-            self.eat(&TokenKind::Semicolon);
+            self.eat(TokenKind::Semicolon);
             return Some(Statement {
                 span: span.finish(self.prev_token.span().hi()),
                 kind: StatementKind::Return(expr),
@@ -396,18 +396,18 @@ impl<'a> Parser<'a> {
 
         if self.eat_keyword(Keyword::Function) {
             let name = self.expect_ident();
-            self.expect(&TokenKind::LParen);
+            self.expect(TokenKind::LParen);
             let mut params = vec![];
             while let Some(ident) = self.eat_ident() {
                 params.push(ident);
-                if !self.eat(&TokenKind::Comma) {
+                if !self.eat(TokenKind::Comma) {
                     break;
                 }
             }
-            self.expect(&TokenKind::RParen);
-            self.expect(&TokenKind::LBrace);
+            self.expect(TokenKind::RParen);
+            self.expect(TokenKind::LBrace);
             let body = std::iter::from_fn(|| self.parse_statement()).collect();
-            self.expect(&TokenKind::RBrace);
+            self.expect(TokenKind::RBrace);
             let span = span.finish(self.last_token_end());
             return Some(Statement {
                 span,
@@ -435,19 +435,19 @@ impl<'a> Parser<'a> {
                 let sp = self.token.span();
                 let name = self.expect_ident();
                 let init = self
-                    .eat(&TokenKind::Equals)
+                    .eat(TokenKind::Equals)
                     .then(|| self.parse_expression_precedence(Precedence::COMMA));
                 decls.push(VariableDeclarator {
                     span: sp.to(self.prev_token.span()),
                     name,
                     init,
                 });
-                if !self.eat(&TokenKind::Comma) {
+                if !self.eat(TokenKind::Comma) {
                     break;
                 }
             }
             let decl_span = span.finish(self.last_token_end());
-            self.eat(&TokenKind::Semicolon);
+            self.eat(TokenKind::Semicolon);
             let stmt_span = decl_span.to(self.prev_token.span());
             return Some(Statement {
                 span: stmt_span,
@@ -464,7 +464,7 @@ impl<'a> Parser<'a> {
         let kind = self
             .try_parse_expression()
             .map_or(StatementKind::Empty, StatementKind::Expression);
-        self.eat(&TokenKind::Semicolon);
+        self.eat(TokenKind::Semicolon);
         Some(Statement {
             span: span.finish(self.prev_token.span().hi()),
             kind,
@@ -496,7 +496,7 @@ impl<'a> Parser<'a> {
         Some(expr)
     }
 
-    fn get_rule(&self, kind: &TokenKind) -> ParseRule<'a> {
+    fn get_rule(&self, kind: TokenKind) -> ParseRule<'a> {
         macro_rules! r {
             () => {
                 ParseRule {
@@ -608,7 +608,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_literal(&mut self) -> Expression {
-        let TokenKind::Literal(lit) = self.prev_token.kind().clone() else {
+        let TokenKind::Literal(lit) = self.prev_token.kind() else {
             unreachable!()
         };
         Expression {
@@ -622,11 +622,11 @@ impl<'a> Parser<'a> {
         let mut exprs = vec![];
         while let Some(expr) = self.try_parse_expression_precedence(Precedence::TERNARY) {
             exprs.push(expr);
-            if !self.eat(&TokenKind::Comma) {
+            if !self.eat(TokenKind::Comma) {
                 break;
             }
         }
-        self.expect(&TokenKind::RBracket);
+        self.expect(TokenKind::RBracket);
         Expression {
             span: start.to(self.prev_token.span()),
             kind: ExpressionKind::Array(exprs),
@@ -637,13 +637,13 @@ impl<'a> Parser<'a> {
         let start = self.prev_token.span();
         let mut props = vec![];
         while let Some(ident) = self.eat_ident() {
-            let value = self.eat(&TokenKind::Colon).then(|| self.parse_expression());
+            let value = self.eat(TokenKind::Colon).then(|| self.parse_expression());
             props.push((ident, value));
-            if !self.eat(&TokenKind::Comma) {
+            if !self.eat(TokenKind::Comma) {
                 break;
             }
         }
-        self.expect(&TokenKind::RBrace);
+        self.expect(TokenKind::RBrace);
         Expression {
             span: start.to(self.prev_token.span()),
             kind: ExpressionKind::Object(props),
@@ -672,11 +672,11 @@ impl<'a> Parser<'a> {
         let mut args = vec![];
         while let Some(expr) = self.try_parse_expression_precedence(Precedence::TERNARY) {
             args.push(expr);
-            if !self.eat(&TokenKind::Comma) {
+            if !self.eat(TokenKind::Comma) {
                 break;
             }
         }
-        self.expect(&TokenKind::RParen);
+        self.expect(TokenKind::RParen);
         Expression {
             span: start.to(self.prev_token.span()),
             kind: ExpressionKind::Call(Box::new(left), args),
@@ -686,15 +686,15 @@ impl<'a> Parser<'a> {
     fn parse_new(&mut self) -> Expression {
         let start = self.prev_token.span();
         let target = self.parse_expression_precedence(Precedence::CALL);
-        self.expect(&TokenKind::LParen);
+        self.expect(TokenKind::LParen);
         let mut args = vec![];
         while let Some(expr) = self.try_parse_expression_precedence(Precedence::TERNARY) {
             args.push(expr);
-            if !self.eat(&TokenKind::Comma) {
+            if !self.eat(TokenKind::Comma) {
                 break;
             }
         }
-        self.expect(&TokenKind::RParen);
+        self.expect(TokenKind::RParen);
         Expression {
             span: start.to(self.prev_token.span()),
             kind: ExpressionKind::New(Box::new(target), args),
