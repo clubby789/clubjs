@@ -219,15 +219,3 @@ impl<'a> Lexer<'a> {
         })
     }
 }
-
-pub fn lex(src: &str) -> Vec<Token> {
-    let mut tok = Lexer {
-        src,
-        chars: src.chars(),
-    };
-    let mut tokens = vec![];
-    while let Some(t) = tok.next_token() {
-        tokens.push(t);
-    }
-    tokens
-}

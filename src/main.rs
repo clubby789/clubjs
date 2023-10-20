@@ -1,5 +1,3 @@
-#![allow(dead_code, unused)]
-
 mod ast;
 mod lex;
 
@@ -31,6 +29,6 @@ impl Span {
 
 fn main() {
     let src = std::fs::read_to_string("src.js").unwrap();
-    let mut p = ast::Parser::new(&src);
+    let p = ast::Parser::new(&src);
     println!("{:#?}", p.parse());
 }
