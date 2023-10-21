@@ -33,6 +33,10 @@ pub enum TokenKind {
     Minus,
     MinusMinus,
     Slash,
+    Bar,
+    BarBar,
+    And,
+    AndAnd,
     #[default]
     Eof,
 }
@@ -191,6 +195,10 @@ impl<'a> Lexer<'a> {
             '-' if self.try_eat('-') => TokenKind::MinusMinus,
             '-' => TokenKind::Minus,
             '/' => TokenKind::Slash,
+            '|' if self.try_eat('|') => TokenKind::BarBar,
+            '|' => TokenKind::Bar,
+            '&' if self.try_eat('&') => TokenKind::AndAnd,
+            '&' => TokenKind::And,
             c if c.is_ascii_digit() => {
                 let mut n = (c as u8 - b'0') as u128;
                 while let Some(c) = self.try_eat_fn(|c| c.is_ascii_digit()) {

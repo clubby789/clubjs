@@ -779,6 +779,8 @@ impl<'a> Parser<'a> {
             TokenKind::Slash|TokenKind::Asterisk => r!(_, Self::parse_binary, FACTOR),
             TokenKind::Gt|TokenKind::GtE|TokenKind::Lt|TokenKind::LtE => r!(_, Self::parse_binary, COMPARE),
             TokenKind::PlusPlus|TokenKind::MinusMinus => r!(_, Self::parse_postfix, POSTFIX),
+            TokenKind::BarBar => r!(_, Self::parse_logical, LOGICAL_OR),
+            TokenKind::AndAnd => r!(_, Self::parse_logical, LOGICAL_AND),
             TokenKind::Period => r!(_, Self::parse_member, MEMBER),
             TokenKind::Ident => match self.intern(token) {
                 kw::TypeOf => r!(Self::parse_unary, _, UNARY),
@@ -871,6 +873,20 @@ impl<'a> Parser<'a> {
         Expression {
             span: left.span.to(right.span),
             kind: ExpressionKind::Binary(Box::new(left), op, Box::new(right)),
+        }
+    }
+
+    fn parse_logical(&mut self, left: Expression) -> Expression {
+        let op = match self.prev_token.kind() {
+            TokenKind::BarBar => LogicalOperator::Or,
+            TokenKind::AndAnd => LogicalOperator::And,
+            _ => unreachable!(),
+        };
+        let rule = self.get_rule(self.prev_token);
+        let right = self.parse_expression_precedence(rule.precedence.next());
+        Expression {
+            span: left.span.to(right.span),
+            kind: ExpressionKind::Logical(Box::new(left), op, Box::new(right)),
         }
     }
 
@@ -1095,7 +1111,8 @@ impl Precedence {
     const TERNARY: Self = Self(2);
     // const ARROW: Self = Self(2);
     const ASSIGNMENT: Self = Self(2);
-    // const LOGICAL_OR: Self = Self(3);
+    const LOGICAL_OR: Self = Self(3);
+    const LOGICAL_AND: Self = Self(4);
     // const EQUALITY: Self = Self(8);
     const COMPARE: Self = Self(9);
     // const SHIFT: Self = Self(10);
