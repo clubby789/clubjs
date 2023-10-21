@@ -608,9 +608,10 @@ impl<'a> Parser<'a> {
     }
 
     fn try_parse_expression_precedence(&mut self, prec: Precedence) -> Option<Expression> {
+        let rule = self.get_rule(self.token);
+        let func = rule.prefix?;
         self.advance();
-        let rule = self.get_rule(self.prev_token);
-        let mut expr = rule.prefix?(self);
+        let mut expr = func(self);
         while self.get_rule(self.token).precedence >= prec {
             self.advance();
             expr = self.get_rule(self.prev_token).infix.unwrap()(self, expr);
@@ -749,7 +750,7 @@ impl<'a> Parser<'a> {
     fn parse_array(&mut self) -> Expression {
         let start = self.prev_token.span();
         let mut exprs = vec![];
-        while let Some(expr) = self.try_parse_expression_precedence(Precedence::TERNARY) {
+        while let Some(expr) = self.try_parse_expression() {
             exprs.push(expr);
             if !self.eat(TokenKind::Comma) {
                 break;
@@ -799,7 +800,7 @@ impl<'a> Parser<'a> {
     fn parse_call(&mut self, left: Expression) -> Expression {
         let start = left.span;
         let mut args = vec![];
-        while let Some(expr) = self.try_parse_expression_precedence(Precedence::TERNARY) {
+        while let Some(expr) = self.try_parse_expression() {
             args.push(expr);
             if !self.eat(TokenKind::Comma) {
                 break;
