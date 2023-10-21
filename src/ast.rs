@@ -108,7 +108,8 @@ pub enum ExpressionKind {
     New(Box<Expression>),
     Call(Box<Expression>, Vec<Expression>),
     Member(Box<Expression>, MemberKey),
-    Yield(Option<Box<Expression>>),
+    // TODO: Support yield and generators
+    // Yield(Option<Box<Expression>>),
     Literal(crate::lex::Literal),
     Identifier(Symbol),
 }
@@ -123,9 +124,9 @@ pub enum MemberKey {
 pub enum UnaryOperator {
     Plus,
     Minus,
-    Bang,
-    Tilde,
-    Typeof,
+    LogicalNot,
+    BitwiseNot,
+    TypeOf,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -776,13 +777,15 @@ impl<'a> Parser<'a> {
             };
         }
         match token.kind() {
-            TokenKind::Bang | TokenKind::Tilde /*| TokenKind::Keyword(Keyword::TypeOf)*/ => {
+            TokenKind::Bang | TokenKind::Tilde => {
                 r!(Self::parse_unary, _, UNARY)
             }
             TokenKind::Plus | TokenKind::Minus => r!(Self::parse_unary, Self::parse_binary, UNARY),
-            TokenKind::Slash|TokenKind::Asterisk => r!(_, Self::parse_binary, FACTOR),
-            TokenKind::Gt|TokenKind::GtE|TokenKind::Lt|TokenKind::LtE => r!(_, Self::parse_binary, COMPARE),
-            TokenKind::PlusPlus|TokenKind::MinusMinus => r!(_, Self::parse_postfix, POSTFIX),
+            TokenKind::Slash | TokenKind::Asterisk => r!(_, Self::parse_binary, FACTOR),
+            TokenKind::Gt | TokenKind::GtE | TokenKind::Lt | TokenKind::LtE => {
+                r!(_, Self::parse_binary, COMPARE)
+            }
+            TokenKind::PlusPlus | TokenKind::MinusMinus => r!(_, Self::parse_postfix, POSTFIX),
             TokenKind::BarBar => r!(_, Self::parse_logical, LOGICAL_OR),
             TokenKind::AndAnd => r!(_, Self::parse_logical, LOGICAL_AND),
             TokenKind::Period => r!(_, Self::parse_member, MEMBER),
@@ -791,12 +794,14 @@ impl<'a> Parser<'a> {
                 kw::This => r!(Self::parse_this, _),
                 kw::New => r!(Self::parse_new, _, NEW),
                 kw::Function => r!(Self::parse_function_expression, _),
-                kw::Case|kw::Default => r!(),
-                kw::Of|kw::In => r!(),
+                kw::Case | kw::Default => r!(),
+                kw::Of | kw::In => r!(),
                 #[cfg(debug_assertions)]
-                sym if kw::KEYWORD_NAMES.contains(&sym.as_str()) => panic!("parsing keyword {sym:?} as identifier"),
+                sym if kw::KEYWORD_NAMES.contains(&sym.as_str()) => {
+                    panic!("parsing keyword {sym:?} as identifier")
+                }
                 _ => r!(Self::parse_identifier, _),
-            }
+            },
             TokenKind::Question => r!(_, Self::parse_ternary, TERNARY),
             TokenKind::Equals => r!(_, Self::parse_assign_expression, ASSIGNMENT),
             TokenKind::Literal(_) => r!(Self::parse_literal, _),
@@ -851,7 +856,13 @@ impl<'a> Parser<'a> {
         let op = match self.prev_token.kind() {
             TokenKind::Plus => UnaryOperator::Plus,
             TokenKind::Minus => UnaryOperator::Minus,
-            c => todo!("`{c:?}`"),
+            TokenKind::Bang => UnaryOperator::LogicalNot,
+            TokenKind::Tilde => UnaryOperator::BitwiseNot,
+            TokenKind::Ident => {
+                debug_assert!(self.intern(self.prev_token) == kw::TypeOf);
+                UnaryOperator::TypeOf
+            }
+            _ => unreachable!(),
         };
         let op_span = self.prev_token.span();
         let expr = self.parse_expression_precedence(Precedence::UNARY);
