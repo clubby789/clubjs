@@ -60,7 +60,7 @@ pub enum StatementKind {
     Switch(Expression, Vec<SwitchCase>),
     Return(Option<Expression>),
     Throw(Expression),
-    // TODO: Try statement,
+    Try(Vec<Statement>, Option<CatchClause>, Vec<CatchClause>),
     While(Expression, Box<Statement>),
     DoWhile(Box<Statement>, Expression),
     For(Option<ForInit>, Option<Expression>, Option<Expression>),
@@ -182,6 +182,14 @@ pub struct SwitchCase {
     span: Span,
     test: Option<Expression>,
     consequent: Vec<Statement>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CatchClause {
+    span: Span,
+    param: Symbol,
+    guard: Option<Expression>,
+    body: Vec<Statement>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -557,6 +565,7 @@ impl<'a> Parser<'a> {
                 kw::TypeOf => r!(Self::parse_unary, _, UNARY),
                 kw::This => r!(Self::parse_this, _),
                 kw::New => r!(Self::parse_new, _, NEW),
+                kw::Function => r!(Self::parse_function_expression, _),
                 _ => r!(Self::parse_identifier, _),
             }
             TokenKind::Literal(_) => r!(Self::parse_literal, _),
@@ -698,6 +707,33 @@ impl<'a> Parser<'a> {
         Expression {
             span: start.to(self.prev_token.span()),
             kind: ExpressionKind::New(Box::new(target)),
+        }
+    }
+
+    fn parse_function_expression(&mut self) -> Expression {
+        let start = self.prev_token.span();
+        let name = self.eat_ident();
+        self.expect(TokenKind::LParen);
+        let mut params = vec![];
+        while let Some(ident) = self.eat_ident() {
+            params.push(ident);
+            if !self.eat(TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind::RParen);
+        self.expect(TokenKind::LBrace);
+        let body = std::iter::from_fn(|| self.parse_statement()).collect();
+        self.expect(TokenKind::RBrace);
+        Expression {
+            span: start.to(self.prev_token.span()),
+            kind: ExpressionKind::Function {
+                name,
+                params,
+                defaults: vec![],
+                rest: None,
+                body,
+            },
         }
     }
 }
