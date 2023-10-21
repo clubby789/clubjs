@@ -37,6 +37,7 @@ pub enum TokenKind {
     BarBar,
     And,
     AndAnd,
+    Question,
     #[default]
     Eof,
 }
@@ -187,6 +188,7 @@ impl<'a> Lexer<'a> {
             '<' => TokenKind::Lt,
             '!' if self.try_eat('=') => TokenKind::BangEquals,
             '!' => TokenKind::Bang,
+            '?' => TokenKind::Question,
             '~' => TokenKind::Tilde,
             '.' if self.try_eat_str("..") => TokenKind::DotDotDot,
             '.' => TokenKind::Period,

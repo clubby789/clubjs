@@ -100,7 +100,11 @@ pub enum ExpressionKind {
     /// the bool is true if the operator is a prefix
     Update(Box<Expression>, UpdateOperator, bool),
     Logical(Box<Expression>, LogicalOperator, Box<Expression>),
-    Ternary(Box<Expression>, Box<Expression>, Box<Expression>),
+    Ternary {
+        test: Box<Expression>,
+        consequent: Box<Expression>,
+        alternate: Box<Expression>,
+    },
     New(Box<Expression>),
     Call(Box<Expression>, Vec<Expression>),
     Member(Box<Expression>, MemberKey),
@@ -793,6 +797,7 @@ impl<'a> Parser<'a> {
                 sym if kw::KEYWORD_NAMES.contains(&sym.as_str()) => panic!("parsing keyword {sym:?} as identifier"),
                 _ => r!(Self::parse_identifier, _),
             }
+            TokenKind::Question => r!(_, Self::parse_ternary, TERNARY),
             TokenKind::Equals => r!(_, Self::parse_assign_expression, ASSIGNMENT),
             TokenKind::Literal(_) => r!(Self::parse_literal, _),
             TokenKind::LBracket => r!(Self::parse_array, Self::parse_member, MEMBER),
@@ -1095,6 +1100,20 @@ impl<'a> Parser<'a> {
         Expression {
             span: left.span.to(right.span),
             kind: ExpressionKind::Assignment(var, op, Box::new(right)),
+        }
+    }
+
+    fn parse_ternary(&mut self, left: Expression) -> Expression {
+        let consequent = Box::new(self.parse_expression_precedence(Precedence::TERNARY.next()));
+        self.expect(TokenKind::Colon);
+        let alternate = Box::new(self.parse_expression_precedence(Precedence::TERNARY.next()));
+        Expression {
+            span: left.span.to(self.prev_token.span()),
+            kind: ExpressionKind::Ternary {
+                test: Box::new(left),
+                consequent,
+                alternate,
+            },
         }
     }
 }
