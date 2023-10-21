@@ -710,6 +710,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Plus | TokenKind::Minus => r!(Self::parse_unary, Self::parse_binary, UNARY),
             TokenKind::Slash|TokenKind::Asterisk => r!(_, Self::parse_binary, FACTOR),
+            TokenKind::Gt|TokenKind::GtE|TokenKind::Lt|TokenKind::LtE => r!(_, Self::parse_binary, COMPARE),
             TokenKind::Period => r!(_, Self::parse_member, MEMBER),
             TokenKind::Ident => match self.intern(token) {
                 kw::TypeOf => r!(Self::parse_unary, _, UNARY),
@@ -789,6 +790,10 @@ impl<'a> Parser<'a> {
             TokenKind::Minus => BinaryOperator::Minus,
             TokenKind::Slash => BinaryOperator::Divide,
             TokenKind::Asterisk => BinaryOperator::Multiply,
+            TokenKind::Lt => BinaryOperator::Lt,
+            TokenKind::LtE => BinaryOperator::LtE,
+            TokenKind::Gt => BinaryOperator::Gt,
+            TokenKind::GtE => BinaryOperator::GtE,
             t => todo!("{t:?}"),
         };
         let rule = self.get_rule(self.prev_token);
@@ -1003,7 +1008,7 @@ impl Precedence {
     // const ASSIGNMENT: Self = Self(2);
     // const LOGICAL_OR: Self = Self(3);
     // const EQUALITY: Self = Self(8);
-    // const LT_GT: Self = Self(9);
+    const COMPARE: Self = Self(9);
     // const SHIFT: Self = Self(10);
     // const ADDITION: Self = Self(11);
     const FACTOR: Self = Self(12);
