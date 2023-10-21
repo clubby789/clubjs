@@ -596,6 +596,7 @@ impl<'a> Parser<'a> {
         })
     }
 
+    #[track_caller]
     fn parse_expression(&mut self) -> Expression {
         self.parse_expression_precedence(Precedence::TERNARY)
     }
@@ -672,7 +673,7 @@ impl<'a> Parser<'a> {
                 r!(Self::parse_unary, _, UNARY)
             }
             TokenKind::Plus | TokenKind::Minus => r!(Self::parse_unary, Self::parse_binary, UNARY),
-            TokenKind::Slash => r!(_, Self::parse_binary, FACTOR),
+            TokenKind::Slash|TokenKind::Asterisk => r!(_, Self::parse_binary, FACTOR),
             TokenKind::Period => r!(_, Self::parse_member, MEMBER),
             TokenKind::Ident => match self.intern(token) {
                 kw::TypeOf => r!(Self::parse_unary, _, UNARY),
@@ -688,7 +689,7 @@ impl<'a> Parser<'a> {
             TokenKind::LBracket => r!(Self::parse_array, Self::parse_member, MEMBER),
             TokenKind::LBrace => r!(Self::parse_object, _),
             TokenKind::Comma | TokenKind::RBracket | TokenKind::RBrace => r!(),
-            TokenKind::LParen => r!(Self::parse_expression, Self::parse_call, GROUPING),
+            TokenKind::LParen => r!(Self::parse_grouping, Self::parse_call, GROUPING),
             TokenKind::RParen => r!(),
             TokenKind::Semicolon | TokenKind::Colon | TokenKind::Eof => r!(),
             k => todo!("`{k:?}`"),
@@ -714,6 +715,7 @@ impl<'a> Parser<'a> {
             TokenKind::Plus => BinaryOperator::Plus,
             TokenKind::Minus => BinaryOperator::Minus,
             TokenKind::Slash => BinaryOperator::Divide,
+            TokenKind::Asterisk => BinaryOperator::Multiply,
             t => todo!("{t:?}"),
         };
         let rule = self.get_rule(self.prev_token);
@@ -725,6 +727,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_identifier(&mut self) -> Expression {
+        // could be a single-arg arrow function
+        if let Some(arrow) = self.try_parse_arrow_expression() {
+            return arrow;
+        }
         Expression {
             span: self.prev_token.span(),
             kind: ExpressionKind::Identifier(Symbol::intern(
@@ -838,6 +844,61 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_grouping(&mut self) -> Expression {
+        if let Some(expr) = self.try_parse_arrow_expression() {
+            return expr;
+        }
+        let expr = self.parse_expression_precedence(Precedence::COMMA);
+        self.expect(TokenKind::RParen);
+        expr
+    }
+
+    fn try_parse_arrow_expression(&mut self) -> Option<Expression> {
+        // non-parenthesised form
+        let span = self.prev_token.span();
+        let (params, rest) = if let TokenKind::Ident = self.prev_token.kind() {
+            let arg = self.intern(self.prev_token);
+            if !self.eat(TokenKind::Arrow) {
+                return None;
+            }
+            (vec![FunctionParam::Normal(arg)], None)
+        } else if let TokenKind::LParen = self.prev_token.kind() {
+            let mut lookahead = self.clone();
+            let mut depth = 1usize;
+            while depth > 0 {
+                match lookahead.token.kind() {
+                    TokenKind::LParen => depth += 1,
+                    TokenKind::RParen => depth -= 1,
+                    _ => (),
+                }
+                lookahead.advance();
+            }
+            if lookahead.token.kind() != TokenKind::Arrow {
+                return None;
+            }
+            let (params, rest) = self.parse_function_params();
+            self.expect(TokenKind::RParen);
+            self.expect(TokenKind::Arrow);
+            (params, rest)
+        } else {
+            return None;
+        };
+        let body = self
+            .parse_statement()
+            .expect("arrow functions require a body");
+        let span = span.to(self.prev_token.span());
+        Some(Expression {
+            span,
+            kind: ExpressionKind::Arrow(Function {
+                span,
+                name: None,
+                params,
+                rest,
+                body: vec![body],
+            }),
+        })
+    }
+
     /// Parses function params without parens. Also returns the `rest` param if there was one
     fn parse_function_params(&mut self) -> (Vec<FunctionParam>, Option<Symbol>) {
         let params = self.parse_delimited_list(TokenKind::Comma, Self::parse_function_param);
@@ -865,6 +926,7 @@ impl Precedence {
 
     const COMMA: Self = Self(1);
     const TERNARY: Self = Self(2);
+    // const ARROW: Self = Self(2);
     // const ASSIGNMENT: Self = Self(2);
     // const LOGICAL_OR: Self = Self(3);
     // const EQUALITY: Self = Self(8);
