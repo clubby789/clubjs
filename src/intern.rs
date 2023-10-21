@@ -72,7 +72,7 @@ impl<'a> Interner<'a> {
         let s = self.arena.alloc_str(s);
         // SAFETY: We will only hand out &'a string references which cannot be used
         // by the time the internet and therefore arena have been deallocated
-        let s: &str = unsafe { std::mem::transmute(s) };
+        let s: &str = unsafe { &*(s as *const _) };
         let sym = Symbol(self.strings.len());
         self.strings.push(s);
         self.names.insert(s, sym);
