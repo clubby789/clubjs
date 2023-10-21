@@ -10,7 +10,7 @@ use typed_arena::Arena;
 pub static INTERNER: Lazy<Mutex<Interner>> = Lazy::new(|| Mutex::new(Interner::new()));
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Symbol(usize);
+pub struct Symbol(pub usize);
 
 impl PartialOrd for Symbol {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
@@ -58,7 +58,11 @@ pub struct Interner<'a> {
 
 impl<'a> Interner<'a> {
     pub fn new() -> Self {
-        Self::default()
+        let mut s = Self::default();
+        for &kw in crate::lex::kw::KEYWORD_NAMES {
+            s.intern(kw);
+        }
+        s
     }
 
     pub fn intern(&mut self, s: &str) -> Symbol {

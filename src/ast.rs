@@ -1,6 +1,6 @@
 use crate::{
     intern::Symbol,
-    lex::{Keyword, Lexer, Token, TokenKind},
+    lex::{kw, Lexer, Token, TokenKind},
     HalfSpan, Span,
 };
 
@@ -100,7 +100,7 @@ pub enum ExpressionKind {
     Update(Box<Expression>, UpdateOperator, bool),
     Logical(Box<Expression>, LogicalOperator, Box<Expression>),
     Ternary(Box<Expression>, Box<Expression>, Box<Expression>),
-    New(Box<Expression>, Vec<Expression>),
+    New(Box<Expression>),
     Call(Box<Expression>, Vec<Expression>),
     Member(Box<Expression>, MemberKey),
     Yield(Option<Box<Expression>>),
@@ -254,10 +254,6 @@ impl<'a> Parser<'a> {
         Some(v)
     }
 
-    fn eat_keyword(&mut self, kw: Keyword) -> bool {
-        self.eat(TokenKind::Keyword(kw))
-    }
-
     /// Consumes a token of 'kind', panicking if this doesn't match
     #[track_caller]
     fn expect(&mut self, kind: TokenKind) {
@@ -277,6 +273,15 @@ impl<'a> Parser<'a> {
             .then(|| self.intern(self.prev_token))
     }
 
+    fn eat_symbol(&mut self, sym: Symbol) -> bool {
+        if matches!(self.token.kind(), TokenKind::Ident) && self.intern(self.token) == sym {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
     #[track_caller]
     fn expect_ident(&mut self) -> Symbol {
         self.eat_ident().expect("expected an identifier")
@@ -293,7 +298,7 @@ impl<'a> Parser<'a> {
                 kind: StatementKind::Empty,
             });
         }
-        if self.eat_keyword(Keyword::Debugger) {
+        if self.eat_symbol(kw::Debugger) {
             self.eat(TokenKind::Semicolon);
             return Some(Statement {
                 span: span.finish(self.last_token_end()),
@@ -310,7 +315,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        if self.eat_keyword(Keyword::If) {
+        if self.eat_symbol(kw::If) {
             self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
             self.expect(TokenKind::RParen);
@@ -318,7 +323,7 @@ impl<'a> Parser<'a> {
                 .parse_statement()
                 .expect("if statements must have a block");
             let alternate = self
-                .eat_keyword(Keyword::Else)
+                .eat_symbol(kw::Else)
                 .then(|| self.parse_statement())
                 .flatten();
             return Some(Statement {
@@ -327,7 +332,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        if self.eat_keyword(Keyword::While) {
+        if self.eat_symbol(kw::While) {
             self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
             self.expect(TokenKind::RParen);
@@ -341,7 +346,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        if self.eat_keyword(Keyword::For) {
+        if self.eat_symbol(kw::For) {
             self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
             self.expect(TokenKind::RParen);
@@ -367,7 +372,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        if self.eat_keyword(Keyword::Break) {
+        if self.eat_symbol(kw::Break) {
             let ident = self.eat_ident();
             self.eat(TokenKind::Semicolon);
             return Some(Statement {
@@ -376,7 +381,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        if self.eat_keyword(Keyword::Continue) {
+        if self.eat_symbol(kw::Continue) {
             let ident = self.eat_ident();
             self.eat(TokenKind::Semicolon);
             return Some(Statement {
@@ -385,7 +390,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        if self.eat_keyword(Keyword::Return) {
+        if self.eat_symbol(kw::Return) {
             let expr = self.try_parse_expression();
             self.eat(TokenKind::Semicolon);
             return Some(Statement {
@@ -394,7 +399,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        if self.eat_keyword(Keyword::Function) {
+        if self.eat_symbol(kw::Function) {
             let name = self.expect_ident();
             self.expect(TokenKind::LParen);
             let mut params = vec![];
@@ -423,11 +428,11 @@ impl<'a> Parser<'a> {
         }
 
         for (kw, kind) in [
-            (Keyword::Var, VariableKind::Var),
-            (Keyword::Let, VariableKind::Let),
-            (Keyword::Const, VariableKind::Const),
+            (kw::Var, VariableKind::Var),
+            (kw::Let, VariableKind::Let),
+            (kw::Const, VariableKind::Const),
         ] {
-            if !self.eat_keyword(kw) {
+            if !self.eat_symbol(kw) {
                 continue;
             }
             let mut decls = vec![];
@@ -487,16 +492,16 @@ impl<'a> Parser<'a> {
 
     fn try_parse_expression_precedence(&mut self, prec: Precedence) -> Option<Expression> {
         self.advance();
-        let rule = self.get_rule(self.prev_token.kind());
+        let rule = self.get_rule(self.prev_token);
         let mut expr = rule.prefix?(self);
-        while self.get_rule(self.token.kind()).precedence >= prec {
+        while self.get_rule(self.token).precedence >= prec {
             self.advance();
-            expr = self.get_rule(self.prev_token.kind()).infix.unwrap()(self, expr);
+            expr = self.get_rule(self.prev_token).infix.unwrap()(self, expr);
         }
         Some(expr)
     }
 
-    fn get_rule(&self, kind: TokenKind) -> ParseRule<'a> {
+    fn get_rule(&self, token: Token) -> ParseRule<'a> {
         macro_rules! r {
             () => {
                 ParseRule {
@@ -541,15 +546,19 @@ impl<'a> Parser<'a> {
                 }
             };
         }
-        match kind {
-            TokenKind::Bang | TokenKind::Tilde | TokenKind::Keyword(Keyword::TypeOf) => {
+        match token.kind() {
+            TokenKind::Bang | TokenKind::Tilde /*| TokenKind::Keyword(Keyword::TypeOf)*/ => {
                 r!(Self::parse_unary, _, UNARY)
             }
             TokenKind::Plus | TokenKind::Minus => r!(Self::parse_unary, Self::parse_binary, UNARY),
             TokenKind::Slash => r!(_, Self::parse_binary, FACTOR),
             TokenKind::Period => r!(_, Self::parse_member, MEMBER),
-            TokenKind::Ident => r!(Self::parse_identifier, _),
-            TokenKind::Keyword(Keyword::This) => r!(Self::parse_this, _),
+            TokenKind::Ident => match self.intern(token) {
+                kw::TypeOf => r!(Self::parse_unary, _, UNARY),
+                kw::This => r!(Self::parse_this, _),
+                kw::New => r!(Self::parse_new, _, NEW),
+                _ => r!(Self::parse_identifier, _),
+            }
             TokenKind::Literal(_) => r!(Self::parse_literal, _),
             TokenKind::LBracket => r!(Self::parse_array, Self::parse_member, MEMBER),
             TokenKind::LBrace => r!(Self::parse_object, _),
@@ -557,7 +566,6 @@ impl<'a> Parser<'a> {
             TokenKind::LParen => r!(Self::parse_expression, Self::parse_call, GROUPING),
             TokenKind::RParen => r!(),
             TokenKind::Semicolon | TokenKind::Eof => r!(),
-            TokenKind::Keyword(Keyword::New) => r!(Self::parse_new, _, NEW),
             k => todo!("`{k:?}`"),
         }
     }
@@ -583,7 +591,7 @@ impl<'a> Parser<'a> {
             TokenKind::Slash => BinaryOperator::Divide,
             t => todo!("{t:?}"),
         };
-        let rule = self.get_rule(self.prev_token.kind());
+        let rule = self.get_rule(self.prev_token);
         let right = self.parse_expression_precedence(rule.precedence.next());
         Expression {
             span: left.span.to(right.span),
@@ -654,8 +662,8 @@ impl<'a> Parser<'a> {
         let start = self.prev_token.span();
         let key = match self.prev_token.kind() {
             TokenKind::Period => MemberKey::Static(self.expect_ident()),
-            tok @ TokenKind::LBracket => {
-                let rule = self.get_rule(tok);
+            TokenKind::LBracket => {
+                let rule = self.get_rule(self.prev_token);
                 let right = self.parse_expression_precedence(rule.precedence.next());
                 MemberKey::Computed(Box::new(right))
             }
@@ -686,18 +694,10 @@ impl<'a> Parser<'a> {
     fn parse_new(&mut self) -> Expression {
         let start = self.prev_token.span();
         let target = self.parse_expression_precedence(Precedence::CALL);
-        self.expect(TokenKind::LParen);
-        let mut args = vec![];
-        while let Some(expr) = self.try_parse_expression_precedence(Precedence::TERNARY) {
-            args.push(expr);
-            if !self.eat(TokenKind::Comma) {
-                break;
-            }
-        }
-        self.expect(TokenKind::RParen);
+
         Expression {
             span: start.to(self.prev_token.span()),
-            kind: ExpressionKind::New(Box::new(target), args),
+            kind: ExpressionKind::New(Box::new(target)),
         }
     }
 }

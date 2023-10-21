@@ -1,13 +1,10 @@
-use std::{str::Chars, collections::HashMap};
-
-use once_cell::sync::Lazy;
+use std::str::Chars;
 
 use crate::{intern::Symbol, Span};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum TokenKind {
     Ident,
-    Keyword(Keyword),
     Literal(Literal),
     LBracket,
     RBracket,
@@ -43,47 +40,30 @@ pub enum Literal {
     String(Symbol),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Keyword {
-    Function,
-    Return,
-    If,
-    Else,
-    While,
-    For,
-    Break,
-    Continue,
-    Var,
-    Let,
-    Const,
-    Debugger,
-    This,
-    TypeOf,
-    New,
-    Yield,
+#[allow(non_upper_case_globals)]
+pub mod kw {
+    use crate::intern::Symbol;
+    pub const Function: Symbol = Symbol(0);
+    pub const Return: Symbol = Symbol(1);
+    pub const If: Symbol = Symbol(2);
+    pub const Else: Symbol = Symbol(3);
+    pub const While: Symbol = Symbol(4);
+    pub const For: Symbol = Symbol(5);
+    pub const Break: Symbol = Symbol(6);
+    pub const Continue: Symbol = Symbol(7);
+    pub const Var: Symbol = Symbol(8);
+    pub const Let: Symbol = Symbol(9);
+    pub const Const: Symbol = Symbol(10);
+    pub const Debugger: Symbol = Symbol(11);
+    pub const This: Symbol = Symbol(12);
+    pub const TypeOf: Symbol = Symbol(13);
+    pub const New: Symbol = Symbol(14);
+    pub const Yield: Symbol = Symbol(15);
+    pub static KEYWORD_NAMES: &[&str] = &[
+        "function", "return", "if", "else", "while", "for", "break", "continue", "var", "let",
+        "const", "debugger", "this", "typeof", "new", "yield",
+    ];
 }
-
-static KEYWORDS: Lazy<HashMap<&'static str, Keyword>> = Lazy::new(|| {
-    use Keyword::*;
-    [
-        ("function", Function),
-        ("return", Return),
-        ("if", If),
-        ("else", Else),
-        ("while", While),
-        ("for", For),
-        ("break", Break),
-        ("continue", Continue),
-        ("var", Var),
-        ("let", Let),
-        ("const", Const),
-        ("debugger", Debugger),
-        ("this", This),
-        ("typeof", TypeOf),
-        ("new", New),
-        ("yield", Yield)
-    ].into_iter().collect()
-});
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub struct Token {
@@ -191,11 +171,11 @@ impl<'a> Lexer<'a> {
                 TokenKind::Literal(Literal::Integer(n))
             }
             c if c.is_ascii_alphabetic() || c == '_' => {
-                let mut ident = c.to_string();
-                while let Some(c) = self.try_eat_fn(|c| c.is_ascii_alphanumeric() || c == '_') {
-                    ident.push(c);
-                }
-                KEYWORDS.get(ident.as_str()).copied().map_or(TokenKind::Ident, TokenKind::Keyword)
+                while self
+                    .try_eat_fn(|c| c.is_ascii_alphanumeric() || c == '_')
+                    .is_some()
+                {}
+                TokenKind::Ident
             }
             c @ ('"' | '\'') => {
                 // TODO: handle escaped quotes
