@@ -357,6 +357,22 @@ impl<'a> Parser<'a> {
             });
         }
 
+        if self.eat_symbol(kw::Do) {
+            let content = self
+                .parse_statement()
+                .expect("do/while statements must have a body");
+            if !self.eat_symbol(kw::While) {
+                panic!("expected `while` after `do`")
+            }
+            self.expect(TokenKind::LParen);
+            let expr = self.parse_expression();
+            self.expect(TokenKind::RParen);
+            return Some(Statement {
+                span: span.finish(self.last_token_end()),
+                kind: StatementKind::DoWhile(Box::new(content), expr),
+            });
+        }
+
         if self.eat_symbol(kw::For) {
             self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
