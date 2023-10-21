@@ -298,6 +298,21 @@ impl<'a> Parser<'a> {
         self.eat_ident().expect("expected an identifier")
     }
 
+    fn parse_delimited_list<T>(
+        &mut self,
+        delim: TokenKind,
+        f: fn(&mut Self) -> Option<T>,
+    ) -> Vec<T> {
+        let mut content = vec![];
+        while let Some(v) = f(self) {
+            content.push(v);
+            if !self.eat(delim) {
+                break;
+            }
+        }
+        content
+    }
+
     fn parse_statement(&mut self) -> Option<Statement> {
         if matches!(self.token.kind(), TokenKind::Eof | TokenKind::RBrace) {
             return None;
@@ -438,13 +453,7 @@ impl<'a> Parser<'a> {
         if self.eat_symbol(kw::Function) {
             let name = self.expect_ident();
             self.expect(TokenKind::LParen);
-            let mut params = vec![];
-            while let Some(ident) = self.eat_ident() {
-                params.push(ident);
-                if !self.eat(TokenKind::Comma) {
-                    break;
-                }
-            }
+            let params = self.parse_delimited_list(TokenKind::Comma, Self::eat_ident);
             self.expect(TokenKind::RParen);
             self.expect(TokenKind::LBrace);
             let body = std::iter::from_fn(|| self.parse_statement()).collect();
@@ -749,13 +758,7 @@ impl<'a> Parser<'a> {
 
     fn parse_array(&mut self) -> Expression {
         let start = self.prev_token.span();
-        let mut exprs = vec![];
-        while let Some(expr) = self.try_parse_expression() {
-            exprs.push(expr);
-            if !self.eat(TokenKind::Comma) {
-                break;
-            }
-        }
+        let exprs = self.parse_delimited_list(TokenKind::Comma, Self::try_parse_expression);
         self.expect(TokenKind::RBracket);
         Expression {
             span: start.to(self.prev_token.span()),
@@ -765,19 +768,21 @@ impl<'a> Parser<'a> {
 
     fn parse_object(&mut self) -> Expression {
         let start = self.prev_token.span();
-        let mut props = vec![];
-        while let Some(ident) = self.eat_ident() {
-            let value = self.eat(TokenKind::Colon).then(|| self.parse_expression());
-            props.push((ident, value));
-            if !self.eat(TokenKind::Comma) {
-                break;
-            }
-        }
+        let props = self.parse_delimited_list(TokenKind::Comma, Self::parse_object_prop);
+
         self.expect(TokenKind::RBrace);
         Expression {
             span: start.to(self.prev_token.span()),
             kind: ExpressionKind::Object(props),
         }
+    }
+
+    fn parse_object_prop(&mut self) -> Option<(Symbol, Option<Expression>)> {
+        let ident = self.eat_ident()?;
+        Some((
+            ident,
+            self.eat(TokenKind::Colon).then(|| self.parse_expression()),
+        ))
     }
 
     fn parse_member(&mut self, left: Expression) -> Expression {
@@ -799,13 +804,7 @@ impl<'a> Parser<'a> {
 
     fn parse_call(&mut self, left: Expression) -> Expression {
         let start = left.span;
-        let mut args = vec![];
-        while let Some(expr) = self.try_parse_expression() {
-            args.push(expr);
-            if !self.eat(TokenKind::Comma) {
-                break;
-            }
-        }
+        let args = self.parse_delimited_list(TokenKind::Comma, Self::try_parse_expression);
         self.expect(TokenKind::RParen);
         Expression {
             span: start.to(self.prev_token.span()),
@@ -827,13 +826,7 @@ impl<'a> Parser<'a> {
         let start = self.prev_token.span();
         let name = self.eat_ident();
         self.expect(TokenKind::LParen);
-        let mut params = vec![];
-        while let Some(ident) = self.eat_ident() {
-            params.push(ident);
-            if !self.eat(TokenKind::Comma) {
-                break;
-            }
-        }
+        let params = self.parse_delimited_list(TokenKind::Comma, Self::eat_ident);
         self.expect(TokenKind::RParen);
         self.expect(TokenKind::LBrace);
         let body = std::iter::from_fn(|| self.parse_statement()).collect();
