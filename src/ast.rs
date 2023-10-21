@@ -69,7 +69,12 @@ pub enum StatementKind {
     Try(Vec<Statement>, Option<CatchClause>, Option<Vec<Statement>>),
     While(Expression, Box<Statement>),
     DoWhile(Box<Statement>, Expression),
-    For(Option<ForInit>, Option<Expression>, Option<Expression>),
+    For(
+        Option<ForInit>,
+        Option<Expression>,
+        Option<Expression>,
+        Box<Statement>,
+    ),
     ForOf(Option<ForInit>, Expression, Box<Statement>, bool),
     VariableDeclaration(VariableDeclaration),
     FunctionDeclaration(Function),
@@ -385,15 +390,38 @@ impl<'a> Parser<'a> {
 
         if self.eat_symbol(kw::For) {
             self.expect(TokenKind::LParen);
-            let expr = self.parse_expression();
+            let init = if self.eat(TokenKind::Semicolon) {
+                None
+            } else {
+                Some(if let Some(decl) = self.parse_variable_declaration() {
+                    ForInit::VariableDeclaration(decl)
+                } else {
+                    ForInit::Expression(self.parse_expression())
+                })
+            };
+
+            let test = if self.token.kind() == TokenKind::Semicolon {
+                None
+            } else {
+                Some(self.parse_expression())
+            };
+            self.expect(TokenKind::Semicolon);
+
+            let update = if self.token.kind() == TokenKind::RParen {
+                None
+            } else {
+                Some(self.parse_expression())
+            };
             self.expect(TokenKind::RParen);
+
+
             let content = self
                 .parse_statement()
                 .expect("while statements must have a block");
 
             return Some(Statement {
                 span: span.finish(self.last_token_end()),
-                kind: StatementKind::While(expr, Box::new(content)),
+                kind: StatementKind::For(init, test, update, Box::new(content)),
             });
         }
 
@@ -463,6 +491,14 @@ impl<'a> Parser<'a> {
                     rest,
                     body,
                 }),
+            });
+        }
+
+        if let Some(decl) = self.parse_variable_declaration() {
+            self.eat(TokenKind::Semicolon);
+            return Some(Statement {
+                span: decl.span.to(self.prev_token.span()),
+                kind: StatementKind::VariableDeclaration(decl),
             });
         }
 
@@ -694,6 +730,43 @@ impl<'a> Parser<'a> {
             TokenKind::Semicolon | TokenKind::Colon | TokenKind::Eof => r!(),
             k => todo!("`{k:?}`"),
         }
+    }
+
+    fn parse_variable_declaration(&mut self) -> Option<VariableDeclaration> {
+        for (kw, kind) in [
+            (kw::Var, VariableKind::Var),
+            (kw::Let, VariableKind::Let),
+            (kw::Const, VariableKind::Const),
+        ] {
+            if !self.eat_symbol(kw) {
+                continue;
+            }
+            let span = self.prev_token.span();
+            let mut decls = vec![];
+            loop {
+                let sp = self.token.span();
+                let name = self.expect_ident();
+                let init = self
+                    .eat(TokenKind::Equals)
+                    .then(|| self.parse_expression_precedence(Precedence::COMMA));
+                decls.push(VariableDeclarator {
+                    span: sp.to(self.prev_token.span()),
+                    name,
+                    init,
+                });
+                if !self.eat(TokenKind::Comma) {
+                    break;
+                }
+            }
+            let decl_span = span.to(self.prev_token.span());
+            self.eat(TokenKind::Semicolon);
+            return Some(VariableDeclaration {
+                span: decl_span,
+                declarations: decls,
+                kind,
+            });
+        }
+        None
     }
 
     fn parse_unary(&mut self) -> Expression {
