@@ -69,11 +69,13 @@ pub mod kw {
     pub const Catch: Symbol = Symbol(20);
     pub const Finally: Symbol = Symbol(21);
     pub const Do: Symbol = Symbol(22);
+    pub const Of: Symbol = Symbol(23);
+    pub const In: Symbol = Symbol(24);
 
-    pub static KEYWORD_NAMES: [&str; 23] = [
+    pub static KEYWORD_NAMES: [&str; 25] = [
         "function", "return", "if", "else", "while", "for", "break", "continue", "var", "let",
         "const", "debugger", "this", "typeof", "new", "switch", "case", "default", "throw", "try",
-        "catch", "finally", "do",
+        "catch", "finally", "do", "of", "in"
     ];
 }
 

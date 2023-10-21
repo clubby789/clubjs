@@ -33,7 +33,7 @@ pub struct VariableDeclaration {
     kind: VariableKind,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum VariableKind {
     Var,
     Let,
@@ -75,7 +75,8 @@ pub enum StatementKind {
         Option<Expression>,
         Box<Statement>,
     ),
-    ForOf(Option<ForInit>, Expression, Box<Statement>, bool),
+    ForIn(ForTarget, Expression, Box<Statement>),
+    ForOf(ForTarget, Expression, Box<Statement>),
     VariableDeclaration(VariableDeclaration),
     FunctionDeclaration(Function),
 }
@@ -197,6 +198,13 @@ pub enum ForInit {
     Expression(Expression),
 }
 
+/// The target of a for/each or for/in loop
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ForTarget {
+    Declaration(VariableKind, Symbol),
+    Variable(Symbol),
+}
+
 #[derive(Clone)]
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
@@ -313,6 +321,23 @@ impl<'a> Parser<'a> {
         content
     }
 
+    /// Returns a copy of the current parser advanced to the end of the current delimited
+    /// region. Should already be inside the region
+    fn lookahead_delim(&self, open: TokenKind, close: TokenKind) -> Self {
+        debug_assert_eq!(self.prev_token.kind(), open);
+        let mut lookahead = self.clone();
+        let mut depth = 1;
+        while depth > 0 {
+            if lookahead.token.kind() == open {
+                depth += 1;
+            } else if lookahead.token.kind() == close {
+                depth -= 1;
+            }
+            lookahead.advance();
+        }
+        lookahead
+    }
+
     fn parse_statement(&mut self) -> Option<Statement> {
         if matches!(self.token.kind(), TokenKind::Eof | TokenKind::RBrace) {
             return None;
@@ -364,7 +389,7 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::RParen);
             let content = self
                 .parse_statement()
-                .expect("while statements must have a block");
+                .expect("while loops must have a body");
 
             return Some(Statement {
                 span: span.finish(self.last_token_end()),
@@ -397,33 +422,73 @@ impl<'a> Parser<'a> {
                 Some(if let Some(decl) = self.parse_variable_declaration() {
                     ForInit::VariableDeclaration(decl)
                 } else {
-                    let expr = ForInit::Expression(self.parse_expression());
-                    self.expect(TokenKind::Semicolon);
-                    expr
+                    ForInit::Expression(self.parse_expression())
                 })
             };
 
-            let test = if self.token.kind() == TokenKind::Semicolon {
-                None
-            } else {
-                Some(self.parse_expression())
+            let get_target = |loopkind| match init
+                .as_ref()
+                .unwrap_or_else(|| panic!("{loopkind} must have a target variable"))
+            {
+                ForInit::VariableDeclaration(VariableDeclaration {
+                    declarations, kind, ..
+                }) => {
+                    if declarations.len() != 1 {
+                        panic!("{loopkind} loops may only have one target variable");
+                    }
+                    let decl = &declarations[0];
+                    if decl.init.is_some() {
+                        panic!("{loopkind} target variables must not have an initializer");
+                    }
+                    ForTarget::Declaration(*kind, decl.name)
+                }
+                ForInit::Expression(Expression {
+                    kind: ExpressionKind::Identifier(ident),
+                    ..
+                }) => ForTarget::Variable(*ident),
+                _ => panic!("invalid target variable in {loopkind}"),
             };
-            self.expect(TokenKind::Semicolon);
 
-            let update = if self.token.kind() == TokenKind::RParen {
-                None
+            let kind = if self.eat_symbol(kw::Of) {
+                let expr = self.parse_expression();
+                self.expect(TokenKind::RParen);
+                let content = self
+                    .parse_statement()
+                    .expect("for/of loops must have a body");
+                StatementKind::ForOf(get_target("for/of"), expr, Box::new(content))
+            } else if self.eat_symbol(kw::In) {
+                let expr = self.parse_expression();
+                self.expect(TokenKind::RParen);
+                let content = self
+                    .parse_statement()
+                    .expect("for/in loops must have a body");
+                StatementKind::ForIn(get_target("for/each"), expr, Box::new(content))
             } else {
-                Some(self.parse_expression())
-            };
-            self.expect(TokenKind::RParen);
+                // If init was empty or a declaration, we will have already consumed the semicolon.
+                // Otherwise, do it now
+                if self.prev_token.kind() != TokenKind::Semicolon {
+                    self.expect(TokenKind::Semicolon);
+                }
+                let test = if self.token.kind() == TokenKind::Semicolon {
+                    None
+                } else {
+                    Some(self.parse_expression())
+                };
+                self.expect(TokenKind::Semicolon);
 
-            let content = self
-                .parse_statement()
-                .expect("while statements must have a block");
+                let update = if self.token.kind() == TokenKind::RParen {
+                    None
+                } else {
+                    Some(self.parse_expression())
+                };
+                self.expect(TokenKind::RParen);
+                let content = self.parse_statement().expect("for loops must have a body");
+                StatementKind::For(init, test, update, Box::new(content))
+            };
 
             return Some(Statement {
                 span: span.finish(self.last_token_end()),
-                kind: StatementKind::For(init, test, update, Box::new(content)),
+                kind,
             });
         }
 
@@ -721,6 +786,7 @@ impl<'a> Parser<'a> {
                 kw::New => r!(Self::parse_new, _, NEW),
                 kw::Function => r!(Self::parse_function_expression, _),
                 kw::Case|kw::Default => r!(),
+                kw::Of|kw::In => r!(),
                 #[cfg(debug_assertions)]
                 sym if kw::KEYWORD_NAMES.contains(&sym.as_str()) => panic!("parsing keyword {sym:?} as identifier"),
                 _ => r!(Self::parse_identifier, _),
@@ -956,16 +1022,7 @@ impl<'a> Parser<'a> {
             }
             (vec![FunctionParam::Normal(arg)], None)
         } else if let TokenKind::LParen = self.prev_token.kind() {
-            let mut lookahead = self.clone();
-            let mut depth = 1usize;
-            while depth > 0 {
-                match lookahead.token.kind() {
-                    TokenKind::LParen => depth += 1,
-                    TokenKind::RParen => depth -= 1,
-                    _ => (),
-                }
-                lookahead.advance();
-            }
+            let lookahead = self.lookahead_delim(TokenKind::LParen, TokenKind::RParen);
             if lookahead.token.kind() != TokenKind::Arrow {
                 return None;
             }
