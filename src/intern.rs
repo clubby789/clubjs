@@ -59,7 +59,7 @@ pub struct Interner<'a> {
 impl<'a> Interner<'a> {
     pub fn new() -> Self {
         let mut s = Self::default();
-        for &kw in crate::lex::kw::KEYWORD_NAMES {
+        for kw in crate::lex::kw::KEYWORD_NAMES {
             s.intern(kw);
         }
         s

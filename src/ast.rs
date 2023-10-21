@@ -60,7 +60,7 @@ pub enum StatementKind {
     Switch(Expression, Vec<SwitchCase>),
     Return(Option<Expression>),
     Throw(Expression),
-    Try(Vec<Statement>, Option<CatchClause>, Vec<CatchClause>),
+    Try(Vec<Statement>, Option<CatchClause>, Option<Vec<Statement>>),
     While(Expression, Box<Statement>),
     DoWhile(Box<Statement>, Expression),
     For(Option<ForInit>, Option<Expression>, Option<Expression>),
@@ -187,9 +187,8 @@ pub struct SwitchCase {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CatchClause {
     span: Span,
-    param: Symbol,
-    guard: Option<Expression>,
-    body: Vec<Statement>,
+    param: Option<Symbol>,
+    block: Vec<Statement>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -528,6 +527,43 @@ impl<'a> Parser<'a> {
             return Some(Statement {
                 span: span.finish(self.last_token_end()),
                 kind: StatementKind::Switch(scrutinee, cases),
+            });
+        }
+
+        if self.eat_symbol(kw::Try) {
+            self.expect(TokenKind::LBrace);
+            let block = std::iter::from_fn(|| self.parse_statement()).collect();
+            self.expect(TokenKind::RBrace);
+            let mut catch = None;
+            let mut finally = None;
+
+            if self.eat_symbol(kw::Catch) {
+                let span = self.prev_token.span();
+                let param = self.eat(TokenKind::LParen).then(|| {
+                    let sym = self.eat_ident().expect("expected an identifier");
+                    self.expect(TokenKind::RParen);
+                    sym
+                });
+                self.expect(TokenKind::LBrace);
+                let block = std::iter::from_fn(|| self.parse_statement()).collect();
+                self.expect(TokenKind::RBrace);
+                catch = Some(CatchClause {
+                    span: span.to(self.prev_token.span()),
+                    param,
+                    block,
+                })
+            }
+
+            if self.eat_symbol(kw::Finally) {
+                self.expect(TokenKind::LBrace);
+                let block = std::iter::from_fn(|| self.parse_statement()).collect();
+                self.expect(TokenKind::RBrace);
+                finally = Some(block);
+            }
+
+            return Some(Statement {
+                span: span.finish(self.last_token_end()),
+                kind: StatementKind::Try(block, catch, finally),
             });
         }
 

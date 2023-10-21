@@ -62,10 +62,14 @@ pub mod kw {
     pub const Case: Symbol = Symbol(16);
     pub const Default: Symbol = Symbol(17);
     pub const Throw: Symbol = Symbol(18);
+    pub const Try: Symbol = Symbol(19);
+    pub const Catch: Symbol = Symbol(20);
+    pub const Finally: Symbol = Symbol(21);
 
-    pub static KEYWORD_NAMES: &[&str] = &[
+    pub static KEYWORD_NAMES: [&str; 22] = [
         "function", "return", "if", "else", "while", "for", "break", "continue", "var", "let",
-        "const", "debugger", "this", "typeof", "new", "switch", "case", "default", "throw"
+        "const", "debugger", "this", "typeof", "new", "switch", "case", "default", "throw", "try",
+        "catch", "finally",
     ];
 }
 
