@@ -26,6 +26,10 @@ impl Span {
     pub fn to(self, other: Span) -> Self {
         Self(self.0, self.1.max(other.hi()))
     }
+
+    pub fn shrink_to_lo(self) -> Self {
+        Self(self.0, self.0)
+    }
 }
 
 fn main() {

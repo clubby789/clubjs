@@ -181,7 +181,7 @@ pub enum LogicalOperator {
 pub struct SwitchCase {
     span: Span,
     test: Option<Expression>,
-    consequent: Vec<Statement>,
+    consequent: Statement,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -472,7 +472,43 @@ impl<'a> Parser<'a> {
             });
         }
 
-        // TODO: Handle switch
+        if self.eat_symbol(kw::Switch) {
+            self.expect(TokenKind::LParen);
+            let scrutinee = self.parse_expression();
+            self.expect(TokenKind::RParen);
+            self.expect(TokenKind::LBrace);
+            let mut cases = vec![];
+            let mut default = false;
+            loop {
+                let span = self.token.span();
+                let test = if self.eat_symbol(kw::Default) {
+                    if default {
+                        panic!("more than one `default` clause in a switch statement");
+                    }
+                    default = true;
+                    None
+                } else if self.eat_symbol(kw::Case) {
+                    Some(self.parse_expression())
+                } else {
+                    break;
+                };
+                self.expect(TokenKind::Colon);
+                let consequent = self.parse_statement().unwrap_or_else(|| Statement {
+                    span: self.token.span().shrink_to_lo(),
+                    kind: StatementKind::Empty,
+                });
+                cases.push(SwitchCase {
+                    span: span.to(self.prev_token.span()),
+                    test,
+                    consequent,
+                });
+            }
+            self.expect(TokenKind::RBrace);
+            return Some(Statement {
+                span: span.finish(self.last_token_end()),
+                kind: StatementKind::Switch(scrutinee, cases),
+            });
+        }
 
         let kind = self
             .try_parse_expression()
@@ -574,7 +610,7 @@ impl<'a> Parser<'a> {
             TokenKind::Comma | TokenKind::RBracket | TokenKind::RBrace => r!(),
             TokenKind::LParen => r!(Self::parse_expression, Self::parse_call, GROUPING),
             TokenKind::RParen => r!(),
-            TokenKind::Semicolon | TokenKind::Eof => r!(),
+            TokenKind::Semicolon | TokenKind::Colon | TokenKind::Eof => r!(),
             k => todo!("`{k:?}`"),
         }
     }

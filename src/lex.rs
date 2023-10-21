@@ -58,10 +58,12 @@ pub mod kw {
     pub const This: Symbol = Symbol(12);
     pub const TypeOf: Symbol = Symbol(13);
     pub const New: Symbol = Symbol(14);
-    pub const Yield: Symbol = Symbol(15);
+    pub const Switch: Symbol = Symbol(15);
+    pub const Case: Symbol = Symbol(16);
+    pub const Default: Symbol = Symbol(17);
     pub static KEYWORD_NAMES: &[&str] = &[
         "function", "return", "if", "else", "while", "for", "break", "continue", "var", "let",
-        "const", "debugger", "this", "typeof", "new", "yield",
+        "const", "debugger", "this", "typeof", "new", "switch", "case", "default",
     ];
 }
 
