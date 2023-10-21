@@ -5,15 +5,6 @@ mod lex;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 struct Span(usize, usize);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-struct HalfSpan(usize);
-
-impl HalfSpan {
-    pub fn finish(self, end: usize) -> Span {
-        Span(self.0, end)
-    }
-}
-
 impl Span {
     pub fn lo(self) -> usize {
         self.0
@@ -29,6 +20,10 @@ impl Span {
 
     pub fn shrink_to_lo(self) -> Self {
         Self(self.0, self.0)
+    }
+
+    pub fn shrink_to_hi(self) -> Self {
+        Self(self.1, self.1)
     }
 }
 

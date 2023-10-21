@@ -1,7 +1,7 @@
 use crate::{
     intern::Symbol,
     lex::{kw, Lexer, Token, TokenKind},
-    HalfSpan, Span,
+    Span,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -237,10 +237,6 @@ impl<'a> Parser<'a> {
         Program { span, body }
     }
 
-    fn last_token_end(&self) -> usize {
-        self.prev_token.span().hi()
-    }
-
     /// Advance to the next token, replacing `prev_token` with token
     /// Returns the old value of `prev_token`
     fn advance(&mut self) -> Token {
@@ -346,17 +342,17 @@ impl<'a> Parser<'a> {
         if matches!(self.token.kind(), TokenKind::Eof | TokenKind::RBrace) {
             return None;
         }
-        let span = HalfSpan(self.last_token_end());
+        let span = self.prev_token.span().shrink_to_hi();
         if self.eat(TokenKind::Semicolon) {
             return Some(Statement {
-                span: span.finish(self.last_token_end()),
+                span: span.to(self.prev_token.span()),
                 kind: StatementKind::Empty,
             });
         }
         if self.eat_symbol(kw::Debugger) {
             self.eat(TokenKind::Semicolon);
             return Some(Statement {
-                span: span.finish(self.last_token_end()),
+                span: span.to(self.prev_token.span()),
                 kind: StatementKind::Debugger,
             });
         }
@@ -365,7 +361,7 @@ impl<'a> Parser<'a> {
             let block = std::iter::from_fn(|| self.parse_statement()).collect();
             self.expect(TokenKind::RBrace);
             return Some(Statement {
-                span: span.finish(self.last_token_end()),
+                span: span.to(self.prev_token.span()),
                 kind: StatementKind::Block(block),
             });
         }
@@ -382,7 +378,7 @@ impl<'a> Parser<'a> {
                 .then(|| self.parse_statement())
                 .flatten();
             return Some(Statement {
-                span: span.finish(self.last_token_end()),
+                span: span.to(self.prev_token.span()),
                 kind: StatementKind::If(expr, Box::new(content), alternate.map(Box::new)),
             });
         }
@@ -396,7 +392,7 @@ impl<'a> Parser<'a> {
                 .expect("while loops must have a body");
 
             return Some(Statement {
-                span: span.finish(self.last_token_end()),
+                span: span.to(self.prev_token.span()),
                 kind: StatementKind::While(expr, Box::new(content)),
             });
         }
@@ -410,7 +406,7 @@ impl<'a> Parser<'a> {
             let expr = self.parse_expression();
             self.expect(TokenKind::RParen);
             return Some(Statement {
-                span: span.finish(self.last_token_end()),
+                span: span.to(self.prev_token.span()),
                 kind: StatementKind::DoWhile(Box::new(content), expr),
             });
         }
@@ -491,7 +487,7 @@ impl<'a> Parser<'a> {
             };
 
             return Some(Statement {
-                span: span.finish(self.last_token_end()),
+                span: span.to(self.prev_token.span()),
                 kind,
             });
         }
@@ -503,7 +499,7 @@ impl<'a> Parser<'a> {
             assert_eq!(tokens.len(), 2);
             let ident = Symbol::intern(tokens[1].source_string(self.src()));
             return Some(Statement {
-                span: span.finish(stmt.span.hi()),
+                span: span.to(stmt.span),
                 kind: StatementKind::Labeled(ident, Box::new(stmt)),
             });
         }
@@ -512,7 +508,7 @@ impl<'a> Parser<'a> {
             let ident = self.eat_ident();
             self.eat(TokenKind::Semicolon);
             return Some(Statement {
-                span: span.finish(self.prev_token.span().hi()),
+                span: span.to(self.prev_token.span()),
                 kind: StatementKind::Break(ident),
             });
         }
@@ -521,7 +517,7 @@ impl<'a> Parser<'a> {
             let ident = self.eat_ident();
             self.eat(TokenKind::Semicolon);
             return Some(Statement {
-                span: span.finish(self.prev_token.span().hi()),
+                span: span.to(self.prev_token.span()),
                 kind: StatementKind::Continue(ident),
             });
         }
@@ -530,7 +526,7 @@ impl<'a> Parser<'a> {
             let expr = self.try_parse_expression();
             self.eat(TokenKind::Semicolon);
             return Some(Statement {
-                span: span.finish(self.prev_token.span().hi()),
+                span: span.to(self.prev_token.span()),
                 kind: StatementKind::Return(expr),
             });
         }
@@ -539,7 +535,7 @@ impl<'a> Parser<'a> {
             let expr = self.parse_expression();
             self.eat(TokenKind::Semicolon);
             return Some(Statement {
-                span: span.finish(self.prev_token.span().hi()),
+                span: span.to(self.prev_token.span()),
                 kind: StatementKind::Throw(expr),
             });
         }
@@ -552,7 +548,7 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::LBrace);
             let body = std::iter::from_fn(|| self.parse_statement()).collect();
             self.expect(TokenKind::RBrace);
-            let span = span.finish(self.last_token_end());
+            let span = span.to(self.prev_token.span());
             return Some(Statement {
                 span,
                 kind: StatementKind::FunctionDeclaration(Function {
@@ -597,7 +593,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
             }
-            let decl_span = span.finish(self.last_token_end());
+            let decl_span = span.to(self.prev_token.span());
             self.eat(TokenKind::Semicolon);
             let stmt_span = decl_span.to(self.prev_token.span());
             return Some(Statement {
@@ -652,7 +648,7 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokenKind::RBrace);
             return Some(Statement {
-                span: span.finish(self.last_token_end()),
+                span: span.to(self.prev_token.span()),
                 kind: StatementKind::Switch(scrutinee, cases),
             });
         }
@@ -689,7 +685,7 @@ impl<'a> Parser<'a> {
             }
 
             return Some(Statement {
-                span: span.finish(self.last_token_end()),
+                span: span.to(self.prev_token.span()),
                 kind: StatementKind::Try(block, catch, finally),
             });
         }
@@ -699,7 +695,7 @@ impl<'a> Parser<'a> {
             .map_or(StatementKind::Empty, StatementKind::Expression);
         self.eat(TokenKind::Semicolon);
         Some(Statement {
-            span: span.finish(self.prev_token.span().hi()),
+            span: span.to(self.prev_token.span()),
             kind,
         })
     }
