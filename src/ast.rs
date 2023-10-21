@@ -241,7 +241,7 @@ impl<'a> Parser<'a> {
         self.prev_token.span().hi()
     }
 
-    /// Advance to the next token, replacing prev_token with token
+    /// Advance to the next token, replacing `prev_token` with token
     /// Returns the old value of `prev_token`
     fn advance(&mut self) -> Token {
         let tmp = std::mem::replace(&mut self.token, self.lexer.next_token().unwrap_or_default());
@@ -258,7 +258,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Advances several tokens if the next tokens match 'kinds'
-    /// If all were consumed, returns each prev_token value
+    /// If all were consumed, returns each `prev_token` value
     fn eat_many(&mut self, kinds: &[TokenKind]) -> Option<Vec<Token>> {
         let mut tmp = self.clone();
         let mut v = vec![];
@@ -405,9 +405,7 @@ impl<'a> Parser<'a> {
             let content = self
                 .parse_statement()
                 .expect("do/while statements must have a body");
-            if !self.eat_symbol(kw::While) {
-                panic!("expected `while` after `do`")
-            }
+            assert!(self.eat_symbol(kw::While), "expected `while` after `do`");
             self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
             self.expect(TokenKind::RParen);
@@ -437,13 +435,15 @@ impl<'a> Parser<'a> {
                 ForInit::VariableDeclaration(VariableDeclaration {
                     declarations, kind, ..
                 }) => {
-                    if declarations.len() != 1 {
-                        panic!("{loopkind} loops may only have one target variable");
-                    }
+                    assert!(
+                        declarations.len() == 1,
+                        "{loopkind} loops may only have one target variable"
+                    );
                     let decl = &declarations[0];
-                    if decl.init.is_some() {
-                        panic!("{loopkind} target variables must not have an initializer");
-                    }
+                    assert!(
+                        decl.init.is_none(),
+                        "{loopkind} target variables must not have an initializer"
+                    );
                     ForTarget::Declaration(*kind, decl.name)
                 }
                 ForInit::Expression(Expression {
@@ -620,9 +620,10 @@ impl<'a> Parser<'a> {
             loop {
                 let span = self.token.span();
                 let test = if self.eat_symbol(kw::Default) {
-                    if default {
-                        panic!("more than one `default` clause in a switch statement");
-                    }
+                    assert!(
+                        !default,
+                        "more than one `default` clause in a switch statement"
+                    );
                     default = true;
                     None
                 } else if self.eat_symbol(kw::Case) {
@@ -677,7 +678,7 @@ impl<'a> Parser<'a> {
                     span: span.to(self.prev_token.span()),
                     param,
                     block,
-                })
+                });
             }
 
             if self.eat_symbol(kw::Finally) {

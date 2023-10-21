@@ -264,9 +264,9 @@ impl<'a> Lexer<'a> {
             '&' if self.try_eat('=') => TokenKind::AndEquals,
             '&' => TokenKind::And,
             c if c.is_ascii_digit() => {
-                let mut n = (c as u8 - b'0') as u128;
+                let mut n = u128::from(c as u8 - b'0');
                 while let Some(c) = self.try_eat_fn(|c| c.is_ascii_digit()) {
-                    n = (n * 10) + (c as u8 - b'0') as u128;
+                    n = (n * 10) + u128::from(c as u8 - b'0');
                 }
                 TokenKind::Literal(Literal::Integer(n))
             }
@@ -283,9 +283,7 @@ impl<'a> Lexer<'a> {
                 while let Some(chr) = self.try_eat_fn(|chr| chr != c) {
                     content.push(chr);
                 }
-                if !self.try_eat(c) {
-                    panic!("unterminated string literal");
-                }
+                assert!(self.try_eat(c), "unterminated string literal");
                 TokenKind::Literal(Literal::String(Symbol::intern(&content)))
             }
 
