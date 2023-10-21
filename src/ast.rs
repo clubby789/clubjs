@@ -780,7 +780,7 @@ impl<'a> Parser<'a> {
             | TokenKind::BangEquals
             | TokenKind::EqualsEqualsEquals
             | TokenKind::BangEqualsEquals => r!(Self::parse_unary, _, EQUALITY),
-            TokenKind::Gt | TokenKind::GtE | TokenKind::Lt | TokenKind::LtE => {
+            TokenKind::Gt | TokenKind::GtEquals | TokenKind::Lt | TokenKind::LtEquals => {
                 r!(_, Self::parse_binary, COMPARE)
             }
             TokenKind::LtLt | TokenKind::GtGt | TokenKind::GtGtGt => {
@@ -815,7 +815,18 @@ impl<'a> Parser<'a> {
                 _ => r!(Self::parse_identifier, _),
             },
             TokenKind::Question => r!(_, Self::parse_ternary, TERNARY),
-            TokenKind::Equals => r!(_, Self::parse_assign_expression, ASSIGNMENT),
+            TokenKind::Equals
+            | TokenKind::PlusEquals
+            | TokenKind::MinusEquals
+            | TokenKind::AsteriskEquals
+            | TokenKind::SlashEquals
+            | TokenKind::PercentEquals
+            | TokenKind::LtLtEquals
+            | TokenKind::GtGtEquals
+            | TokenKind::GtGtGtEquals
+            | TokenKind::BarEquals
+            | TokenKind::CaretEquals
+            | TokenKind::AndEquals => r!(_, Self::parse_assign_expression, ASSIGNMENT),
             TokenKind::Literal(_) => r!(Self::parse_literal, _),
             TokenKind::LBracket => r!(Self::parse_array, Self::parse_member, MEMBER),
             TokenKind::LBrace => r!(Self::parse_object, _),
@@ -899,12 +910,12 @@ impl<'a> Parser<'a> {
             TokenKind::Caret => BinaryOperator::Xor,
             TokenKind::Asterisk => BinaryOperator::Multiply,
             TokenKind::Lt => BinaryOperator::Lt,
-            TokenKind::LtE => BinaryOperator::LtE,
+            TokenKind::LtEquals => BinaryOperator::LtE,
             TokenKind::LtLt => BinaryOperator::LShift,
             TokenKind::GtGt => BinaryOperator::RShift,
             TokenKind::GtGtGt => BinaryOperator::GtGtGt,
             TokenKind::Gt => BinaryOperator::Gt,
-            TokenKind::GtE => BinaryOperator::GtE,
+            TokenKind::GtEquals => BinaryOperator::GtE,
             TokenKind::Ident => match self.intern(self.prev_token) {
                 kw::In => BinaryOperator::In,
                 kw::InstanceOf => BinaryOperator::InstanceOf,
@@ -1129,7 +1140,18 @@ impl<'a> Parser<'a> {
     fn parse_assign_expression(&mut self, left: Expression) -> Expression {
         let op = match self.prev_token.kind() {
             TokenKind::Equals => AssignmentOperator::Eq,
-            o => unimplemented!("assignment op {o:?}"),
+            TokenKind::PlusEquals => AssignmentOperator::PlusEq,
+            TokenKind::MinusEquals => AssignmentOperator::MinusEq,
+            TokenKind::AsteriskEquals => AssignmentOperator::MulEq,
+            TokenKind::SlashEquals => AssignmentOperator::DivEq,
+            TokenKind::PercentEquals => AssignmentOperator::ModEq,
+            TokenKind::LtLtEquals => AssignmentOperator::LShiftEq,
+            TokenKind::GtGtEquals => AssignmentOperator::RShiftEq,
+            TokenKind::GtGtGtEquals => AssignmentOperator::GtGtGtEq,
+            TokenKind::BarEquals => AssignmentOperator::OrEq,
+            TokenKind::CaretEquals => AssignmentOperator::XorEq,
+            TokenKind::AndEquals => AssignmentOperator::AndEq,
+            _ => unreachable!(),
         };
         let ExpressionKind::Identifier(var) = left.kind else {
             // TODO: support proper patterns
