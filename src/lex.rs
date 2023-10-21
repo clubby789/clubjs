@@ -27,6 +27,7 @@ pub enum TokenKind {
     Tilde,
     BangEquals,
     Period,
+    DotDotDot,
     Plus,
     Minus,
     Slash,
@@ -131,6 +132,17 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn try_eat_str(&mut self, s: &str) -> bool {
+        let mut c = self.chars.clone();
+        for chr in s.chars() {
+            if c.next() != Some(chr) {
+                return false;
+            }
+        }
+        self.chars = c;
+        true
+    }
+
     /// Attempts to consume a character matching the predicate f
     fn try_eat_fn<F: FnOnce(char) -> bool>(&mut self, f: F) -> Option<char> {
         let c = self.chars.clone().next()?;
@@ -168,6 +180,7 @@ impl<'a> Lexer<'a> {
             '!' if self.try_eat('=') => TokenKind::BangEquals,
             '!' => TokenKind::Bang,
             '~' => TokenKind::Tilde,
+            '.' if self.try_eat_str("..") => TokenKind::DotDotDot,
             '.' => TokenKind::Period,
             '+' => TokenKind::Plus,
             '-' => TokenKind::Minus,

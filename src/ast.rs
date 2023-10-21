@@ -13,11 +13,17 @@ pub struct Program {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Function {
     span: Span,
-    name: Symbol,
-    params: Vec<Symbol>,
-    defaults: Vec<Expression>,
+    // May be None for function expressions
+    name: Option<Symbol>,
+    params: Vec<FunctionParam>,
     rest: Option<Symbol>,
     body: Vec<Statement>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FunctionParam {
+    Normal(Symbol),
+    Defaulted(Symbol, Expression),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,19 +86,8 @@ pub enum ExpressionKind {
     This,
     Array(Vec<Expression>),
     Object(Vec<(Symbol, Option<Expression>)>),
-    Function {
-        name: Option<Symbol>,
-        params: Vec<Symbol>,
-        defaults: Vec<Expression>,
-        rest: Option<Symbol>,
-        body: Vec<Statement>,
-    },
-    Arrow {
-        params: Vec<Symbol>,
-        defaults: Vec<Expression>,
-        rest: Option<Symbol>,
-        body: Vec<Statement>,
-    },
+    Function(Function),
+    Arrow(Function),
     Unary(UnaryOperator, Box<Expression>),
     Binary(Box<Expression>, BinaryOperator, Box<Expression>),
     Assignment(Symbol, AssignmentOperator, Box<Expression>),
@@ -453,7 +448,7 @@ impl<'a> Parser<'a> {
         if self.eat_symbol(kw::Function) {
             let name = self.expect_ident();
             self.expect(TokenKind::LParen);
-            let params = self.parse_delimited_list(TokenKind::Comma, Self::eat_ident);
+            let (params, rest) = self.parse_function_params();
             self.expect(TokenKind::RParen);
             self.expect(TokenKind::LBrace);
             let body = std::iter::from_fn(|| self.parse_statement()).collect();
@@ -463,10 +458,9 @@ impl<'a> Parser<'a> {
                 span,
                 kind: StatementKind::FunctionDeclaration(Function {
                     span,
-                    name,
+                    name: Some(name),
                     params,
-                    defaults: vec![],
-                    rest: None,
+                    rest,
                     body,
                 }),
             });
@@ -826,20 +820,37 @@ impl<'a> Parser<'a> {
         let start = self.prev_token.span();
         let name = self.eat_ident();
         self.expect(TokenKind::LParen);
-        let params = self.parse_delimited_list(TokenKind::Comma, Self::eat_ident);
+        let (params, rest) = self.parse_function_params();
         self.expect(TokenKind::RParen);
         self.expect(TokenKind::LBrace);
         let body = std::iter::from_fn(|| self.parse_statement()).collect();
         self.expect(TokenKind::RBrace);
+        let span = start.to(self.prev_token.span());
         Expression {
-            span: start.to(self.prev_token.span()),
-            kind: ExpressionKind::Function {
+            span,
+            kind: ExpressionKind::Function(Function {
+                span,
                 name,
                 params,
-                defaults: vec![],
-                rest: None,
+                rest,
                 body,
-            },
+            }),
+        }
+    }
+
+    /// Parses function params without parens. Also returns the `rest` param if there was one
+    fn parse_function_params(&mut self) -> (Vec<FunctionParam>, Option<Symbol>) {
+        let params = self.parse_delimited_list(TokenKind::Comma, Self::parse_function_param);
+        let rest = self.eat(TokenKind::DotDotDot).then(|| self.expect_ident());
+        (params, rest)
+    }
+
+    fn parse_function_param(&mut self) -> Option<FunctionParam> {
+        let ident = self.eat_ident()?;
+        if self.eat(TokenKind::Equals) {
+            Some(FunctionParam::Defaulted(ident, self.parse_expression()))
+        } else {
+            Some(FunctionParam::Normal(ident))
         }
     }
 }
