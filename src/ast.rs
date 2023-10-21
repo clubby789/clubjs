@@ -396,7 +396,9 @@ impl<'a> Parser<'a> {
                 Some(if let Some(decl) = self.parse_variable_declaration() {
                     ForInit::VariableDeclaration(decl)
                 } else {
-                    ForInit::Expression(self.parse_expression())
+                    let expr = ForInit::Expression(self.parse_expression());
+                    self.expect(TokenKind::Semicolon);
+                    expr
                 })
             };
 
@@ -413,7 +415,6 @@ impl<'a> Parser<'a> {
                 Some(self.parse_expression())
             };
             self.expect(TokenKind::RParen);
-
 
             let content = self
                 .parse_statement()
