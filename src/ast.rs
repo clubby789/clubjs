@@ -152,7 +152,6 @@ pub enum BinaryOperator {
     And,
     In,
     InstanceOf,
-    DotDot,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -777,25 +776,38 @@ impl<'a> Parser<'a> {
             };
         }
         match token.kind() {
-            TokenKind::Bang | TokenKind::Tilde => {
-                r!(Self::parse_unary, _, UNARY)
-            }
-            TokenKind::Plus | TokenKind::Minus => r!(Self::parse_unary, Self::parse_binary, UNARY),
-            TokenKind::Slash | TokenKind::Asterisk => r!(_, Self::parse_binary, FACTOR),
+            TokenKind::EqualsEquals
+            | TokenKind::BangEquals
+            | TokenKind::EqualsEqualsEquals
+            | TokenKind::BangEqualsEquals => r!(Self::parse_unary, _, EQUALITY),
             TokenKind::Gt | TokenKind::GtE | TokenKind::Lt | TokenKind::LtE => {
                 r!(_, Self::parse_binary, COMPARE)
+            }
+            TokenKind::LtLt | TokenKind::GtGt | TokenKind::GtGtGt => {
+                r!(_, Self::parse_binary, SHIFT)
+            }
+            TokenKind::Plus | TokenKind::Minus => r!(Self::parse_unary, Self::parse_binary, UNARY),
+            TokenKind::Slash | TokenKind::Asterisk | TokenKind::Percent => {
+                r!(_, Self::parse_binary, FACTOR)
+            }
+            TokenKind::Bar => r!(_, Self::parse_binary, BITWISE_OR),
+            TokenKind::Caret => r!(_, Self::parse_binary, BITWISE_XOR),
+            TokenKind::And => r!(_, Self::parse_binary, BITWISE_AND),
+            TokenKind::Bang | TokenKind::Tilde => {
+                r!(Self::parse_unary, _, UNARY)
             }
             TokenKind::PlusPlus | TokenKind::MinusMinus => r!(_, Self::parse_postfix, POSTFIX),
             TokenKind::BarBar => r!(_, Self::parse_logical, LOGICAL_OR),
             TokenKind::AndAnd => r!(_, Self::parse_logical, LOGICAL_AND),
-            TokenKind::Period => r!(_, Self::parse_member, MEMBER),
+            TokenKind::Dot => r!(_, Self::parse_member, MEMBER),
             TokenKind::Ident => match self.intern(token) {
                 kw::TypeOf => r!(Self::parse_unary, _, UNARY),
                 kw::This => r!(Self::parse_this, _),
                 kw::New => r!(Self::parse_new, _, NEW),
                 kw::Function => r!(Self::parse_function_expression, _),
                 kw::Case | kw::Default => r!(),
-                kw::Of | kw::In => r!(),
+                kw::Of => r!(),
+                kw::In => r!(_, Self::parse_binary, COMPARE),
                 #[cfg(debug_assertions)]
                 sym if kw::KEYWORD_NAMES.contains(&sym.as_str()) => {
                     panic!("parsing keyword {sym:?} as identifier")
@@ -874,15 +886,31 @@ impl<'a> Parser<'a> {
 
     fn parse_binary(&mut self, left: Expression) -> Expression {
         let op = match self.prev_token.kind() {
+            TokenKind::EqualsEquals => BinaryOperator::EqEq,
+            TokenKind::EqualsEqualsEquals => BinaryOperator::EqEqEq,
+            TokenKind::BangEquals => BinaryOperator::NotEq,
+            TokenKind::BangEqualsEquals => BinaryOperator::NotEqEq,
             TokenKind::Plus => BinaryOperator::Plus,
             TokenKind::Minus => BinaryOperator::Minus,
             TokenKind::Slash => BinaryOperator::Divide,
+            TokenKind::Percent => BinaryOperator::Modulo,
+            TokenKind::And => BinaryOperator::And,
+            TokenKind::Bar => BinaryOperator::Or,
+            TokenKind::Caret => BinaryOperator::Xor,
             TokenKind::Asterisk => BinaryOperator::Multiply,
             TokenKind::Lt => BinaryOperator::Lt,
             TokenKind::LtE => BinaryOperator::LtE,
+            TokenKind::LtLt => BinaryOperator::LShift,
+            TokenKind::GtGt => BinaryOperator::RShift,
+            TokenKind::GtGtGt => BinaryOperator::GtGtGt,
             TokenKind::Gt => BinaryOperator::Gt,
             TokenKind::GtE => BinaryOperator::GtE,
-            t => todo!("{t:?}"),
+            TokenKind::Ident => match self.intern(self.prev_token) {
+                kw::In => BinaryOperator::In,
+                kw::InstanceOf => BinaryOperator::InstanceOf,
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
         };
         let rule = self.get_rule(self.prev_token);
         let right = self.parse_expression_precedence(rule.precedence.next());
@@ -980,7 +1008,7 @@ impl<'a> Parser<'a> {
     fn parse_member(&mut self, left: Expression) -> Expression {
         let start = self.prev_token.span();
         let key = match self.prev_token.kind() {
-            TokenKind::Period => MemberKey::Static(self.expect_ident()),
+            TokenKind::Dot => MemberKey::Static(self.expect_ident()),
             TokenKind::LBracket => {
                 let rule = self.get_rule(self.prev_token);
                 let right = self.parse_expression_precedence(rule.precedence.next());
@@ -1143,9 +1171,12 @@ impl Precedence {
     const ASSIGNMENT: Self = Self(2);
     const LOGICAL_OR: Self = Self(3);
     const LOGICAL_AND: Self = Self(4);
-    // const EQUALITY: Self = Self(8);
+    const BITWISE_OR: Self = Self(5);
+    const BITWISE_XOR: Self = Self(6);
+    const BITWISE_AND: Self = Self(7);
+    const EQUALITY: Self = Self(8);
     const COMPARE: Self = Self(9);
-    // const SHIFT: Self = Self(10);
+    const SHIFT: Self = Self(10);
     // const ADDITION: Self = Self(11);
     const FACTOR: Self = Self(12);
     const UNARY: Self = Self(14);
