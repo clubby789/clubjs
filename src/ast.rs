@@ -411,6 +411,15 @@ impl<'a> Parser<'a> {
             });
         }
 
+        if self.eat_symbol(kw::Throw) {
+            let expr = self.parse_expression();
+            self.eat(TokenKind::Semicolon);
+            return Some(Statement {
+                span: span.finish(self.prev_token.span().hi()),
+                kind: StatementKind::Throw(expr),
+            });
+        }
+
         if self.eat_symbol(kw::Function) {
             let name = self.expect_ident();
             self.expect(TokenKind::LParen);
