@@ -1,7 +1,7 @@
 use crate::{
     intern::Symbol,
     lex::{kw, Lexer, Token, TokenKind},
-    Span,
+    span::Span,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -232,7 +232,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(mut self) -> Program {
-        let span = Span(0, self.src().len());
+        let span = Span::new(0, self.src().len());
         let body = std::iter::from_fn(|| self.parse_statement()).collect();
         Program { span, body }
     }

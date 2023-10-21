@@ -1,31 +1,7 @@
 mod ast;
 mod intern;
 mod lex;
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
-struct Span(usize, usize);
-
-impl Span {
-    pub fn lo(self) -> usize {
-        self.0
-    }
-
-    pub fn hi(self) -> usize {
-        self.1
-    }
-
-    pub fn to(self, other: Span) -> Self {
-        Self(self.0, self.1.max(other.hi()))
-    }
-
-    pub fn shrink_to_lo(self) -> Self {
-        Self(self.0, self.0)
-    }
-
-    pub fn shrink_to_hi(self) -> Self {
-        Self(self.1, self.1)
-    }
-}
+mod span;
 
 fn main() {
     let src = std::fs::read_to_string("src.js").unwrap();

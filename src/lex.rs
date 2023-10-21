@@ -1,6 +1,6 @@
 use std::str::Chars;
 
-use crate::{intern::Symbol, Span};
+use crate::{intern::Symbol, span::Span};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum TokenKind {
@@ -291,7 +291,7 @@ impl<'a> Lexer<'a> {
         };
         Some(Token {
             kind,
-            span: Span(start, self.position()),
+            span: Span::new(start, self.position() - start),
         })
     }
 }
