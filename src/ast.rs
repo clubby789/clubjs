@@ -390,6 +390,7 @@ impl<'a> Parser<'a> {
 
         if self.eat_symbol(kw::For) {
             self.expect(TokenKind::LParen);
+            // TODO: support for (i = 1; ...)
             let init = if self.eat(TokenKind::Semicolon) {
                 None
             } else {
@@ -712,6 +713,7 @@ impl<'a> Parser<'a> {
             TokenKind::Plus | TokenKind::Minus => r!(Self::parse_unary, Self::parse_binary, UNARY),
             TokenKind::Slash|TokenKind::Asterisk => r!(_, Self::parse_binary, FACTOR),
             TokenKind::Gt|TokenKind::GtE|TokenKind::Lt|TokenKind::LtE => r!(_, Self::parse_binary, COMPARE),
+            TokenKind::PlusPlus|TokenKind::MinusMinus => r!(_, Self::parse_postfix, POSTFIX),
             TokenKind::Period => r!(_, Self::parse_member, MEMBER),
             TokenKind::Ident => match self.intern(token) {
                 kw::TypeOf => r!(Self::parse_unary, _, UNARY),
@@ -802,6 +804,18 @@ impl<'a> Parser<'a> {
         Expression {
             span: left.span.to(right.span),
             kind: ExpressionKind::Binary(Box::new(left), op, Box::new(right)),
+        }
+    }
+
+    fn parse_postfix(&mut self, left: Expression) -> Expression {
+        let op = match self.prev_token.kind() {
+            TokenKind::PlusPlus => UpdateOperator::PlusPlus,
+            TokenKind::MinusMinus => UpdateOperator::MinusMinus,
+            _ => unreachable!(),
+        };
+        Expression {
+            span: left.span.to(self.prev_token.span()),
+            kind: ExpressionKind::Update(Box::new(left), op, false),
         }
     }
 
@@ -1014,7 +1028,7 @@ impl Precedence {
     // const ADDITION: Self = Self(11);
     const FACTOR: Self = Self(12);
     const UNARY: Self = Self(14);
-    // const POSTFIX: Self = Self(15);
+    const POSTFIX: Self = Self(15);
     const MEMBER: Self = Self(17);
     const NEW: Self = Self(17);
     const CALL: Self = Self(17);

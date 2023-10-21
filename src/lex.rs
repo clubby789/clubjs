@@ -29,7 +29,9 @@ pub enum TokenKind {
     Period,
     DotDotDot,
     Plus,
+    PlusPlus,
     Minus,
+    MinusMinus,
     Slash,
     #[default]
     Eof,
@@ -182,7 +184,9 @@ impl<'a> Lexer<'a> {
             '~' => TokenKind::Tilde,
             '.' if self.try_eat_str("..") => TokenKind::DotDotDot,
             '.' => TokenKind::Period,
+            '+' if self.try_eat('+') => TokenKind::PlusPlus,
             '+' => TokenKind::Plus,
+            '-' if self.try_eat('-') => TokenKind::MinusMinus,
             '-' => TokenKind::Minus,
             '/' => TokenKind::Slash,
             c if c.is_ascii_digit() => {
