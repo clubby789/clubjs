@@ -290,6 +290,10 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn peek_ident(&mut self) -> Option<Symbol> {
+        matches!(self.token.kind(), TokenKind::Ident).then(|| self.intern(self.token))
+    }
+
     #[track_caller]
     fn expect_ident(&mut self) -> Symbol {
         self.eat_ident().expect("expected an identifier")
@@ -493,10 +497,18 @@ impl<'a> Parser<'a> {
                     break;
                 };
                 self.expect(TokenKind::Colon);
-                let consequent = self.parse_statement().unwrap_or_else(|| Statement {
-                    span: self.token.span().shrink_to_lo(),
-                    kind: StatementKind::Empty,
-                });
+                // Special case for empty cases
+                let consequent = if matches!(self.peek_ident(), Some(kw::Case | kw::Default)) {
+                    Statement {
+                        span: self.token.span().shrink_to_lo(),
+                        kind: StatementKind::Empty,
+                    }
+                } else {
+                    self.parse_statement().unwrap_or_else(|| Statement {
+                        span: self.token.span().shrink_to_lo(),
+                        kind: StatementKind::Empty,
+                    })
+                };
                 cases.push(SwitchCase {
                     span: span.to(self.prev_token.span()),
                     test,
@@ -602,6 +614,9 @@ impl<'a> Parser<'a> {
                 kw::This => r!(Self::parse_this, _),
                 kw::New => r!(Self::parse_new, _, NEW),
                 kw::Function => r!(Self::parse_function_expression, _),
+                kw::Case|kw::Default => r!(),
+                #[cfg(debug_assertions)]
+                sym if kw::KEYWORD_NAMES.contains(&sym.as_str()) => panic!("parsing keyword {sym:?} as identifier"),
                 _ => r!(Self::parse_identifier, _),
             }
             TokenKind::Literal(_) => r!(Self::parse_literal, _),
