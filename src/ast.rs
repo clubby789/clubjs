@@ -791,6 +791,7 @@ impl<'a> Parser<'a> {
                 sym if kw::KEYWORD_NAMES.contains(&sym.as_str()) => panic!("parsing keyword {sym:?} as identifier"),
                 _ => r!(Self::parse_identifier, _),
             }
+            TokenKind::Equals => r!(_, Self::parse_assign_expression, ASSIGNMENT),
             TokenKind::Literal(_) => r!(Self::parse_literal, _),
             TokenKind::LBracket => r!(Self::parse_array, Self::parse_member, MEMBER),
             TokenKind::LBrace => r!(Self::parse_object, _),
@@ -1064,6 +1065,22 @@ impl<'a> Parser<'a> {
             Some(FunctionParam::Normal(ident))
         }
     }
+
+    fn parse_assign_expression(&mut self, left: Expression) -> Expression {
+        let op = match self.prev_token.kind() {
+            TokenKind::Equals => AssignmentOperator::Eq,
+            o => unimplemented!("assignment op {o:?}"),
+        };
+        let ExpressionKind::Identifier(var) = left.kind else {
+            // TODO: support proper patterns
+            panic!("left-hand side of assignment must be variable")
+        };
+        let right = self.parse_expression_precedence(Precedence::ASSIGNMENT.next());
+        Expression {
+            span: left.span.to(right.span),
+            kind: ExpressionKind::Assignment(var, op, Box::new(right)),
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Debug)]
@@ -1077,7 +1094,7 @@ impl Precedence {
     const COMMA: Self = Self(1);
     const TERNARY: Self = Self(2);
     // const ARROW: Self = Self(2);
-    // const ASSIGNMENT: Self = Self(2);
+    const ASSIGNMENT: Self = Self(2);
     // const LOGICAL_OR: Self = Self(3);
     // const EQUALITY: Self = Self(8);
     const COMPARE: Self = Self(9);

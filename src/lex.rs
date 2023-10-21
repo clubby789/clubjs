@@ -75,7 +75,7 @@ pub mod kw {
     pub static KEYWORD_NAMES: [&str; 25] = [
         "function", "return", "if", "else", "while", "for", "break", "continue", "var", "let",
         "const", "debugger", "this", "typeof", "new", "switch", "case", "default", "throw", "try",
-        "catch", "finally", "do", "of", "in"
+        "catch", "finally", "do", "of", "in",
     ];
 }
 
