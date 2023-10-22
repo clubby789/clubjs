@@ -130,13 +130,14 @@ impl SourceMap {
     pub fn render_source_span(&self, sp: Span) -> String {
         let start_line = self.lookup_line(sp.lo());
         let end_line = self.lookup_line(sp.hi());
+
         if start_line == end_line {
             let content = self.get_nth_line(start_line);
             let start = self
                 .lookup_col(sp.lo())
                 .checked_sub(1)
                 .expect("columns start at 1");
-            let len = sp.len();
+            let len = self.source[sp.lo()..sp.hi()].chars().count();
             return format!("{content}\n{}{}", " ".repeat(start), "~".repeat(len));
         }
         let mut rendered = String::new();
@@ -151,16 +152,17 @@ impl SourceMap {
                     .lookup_col(sp.lo())
                     .checked_sub(1)
                     .expect("columns start at 1");
-                let write = content.len().checked_sub(skip).unwrap();
-                write!(rendered, "\n{}{}", " ".repeat(skip), "~".repeat(write)).unwrap();
+                let len = content[skip..].chars().count();
+                write!(rendered, "\n{}{}", " ".repeat(skip), "~".repeat(len)).unwrap();
             } else if line == end_line {
-                let write = self
+                let len = self
                     .lookup_col(sp.hi())
                     .checked_sub(1)
                     .expect("columns start at 1");
-                write!(rendered, "\n{}", "~".repeat(write)).unwrap();
+                let len = content[..len].chars().count();
+                write!(rendered, "\n{}", "~".repeat(len)).unwrap();
             } else {
-                write!(rendered, "\n{}", "~".repeat(content.len())).unwrap();
+                write!(rendered, "\n{}", "~".repeat(content.chars().count())).unwrap();
             }
         }
         rendered
