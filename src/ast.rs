@@ -363,36 +363,22 @@ impl<'a> Parser<'a> {
             return None;
         }
         let span = self.prev_token.span().shrink_to_hi();
-        if self.eat(TokenKind::Semicolon) {
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::Empty,
-                },
-                span.to(self.prev_token.span()),
-            ));
-        }
-        if self.eat_symbol(kw::Debugger) {
+        let statement = if self.eat(TokenKind::Semicolon) {
+            Statement {
+                kind: StatementKind::Empty,
+            }
+        } else if self.eat_symbol(kw::Debugger) {
             self.eat(TokenKind::Semicolon);
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::Debugger,
-                },
-                span.to(self.prev_token.span()),
-            ));
-        }
-
-        if self.eat(TokenKind::LBrace) {
+            Statement {
+                kind: StatementKind::Debugger,
+            }
+        } else if self.eat(TokenKind::LBrace) {
             let block = std::iter::from_fn(|| self.parse_statement()).collect();
             self.expect(TokenKind::RBrace);
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::Block(block),
-                },
-                span.to(self.prev_token.span()),
-            ));
-        }
-
-        if self.eat_symbol(kw::If) {
+            Statement {
+                kind: StatementKind::Block(block),
+            }
+        } else if self.eat_symbol(kw::If) {
             self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
             self.expect(TokenKind::RParen);
@@ -403,15 +389,10 @@ impl<'a> Parser<'a> {
                 .eat_symbol(kw::Else)
                 .then(|| self.parse_statement())
                 .flatten();
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::If(expr, Box::new(content), alternate.map(Box::new)),
-                },
-                span.to(self.prev_token.span()),
-            ));
-        }
-
-        if self.eat_symbol(kw::While) {
+            Statement {
+                kind: StatementKind::If(expr, Box::new(content), alternate.map(Box::new)),
+            }
+        } else if self.eat_symbol(kw::While) {
             self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
             self.expect(TokenKind::RParen);
@@ -419,15 +400,10 @@ impl<'a> Parser<'a> {
                 .parse_statement()
                 .expect("while loops must have a body");
 
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::While(expr, Box::new(content)),
-                },
-                span.to(self.prev_token.span()),
-            ));
-        }
-
-        if self.eat_symbol(kw::Do) {
+            Statement {
+                kind: StatementKind::While(expr, Box::new(content)),
+            }
+        } else if self.eat_symbol(kw::Do) {
             let content = self
                 .parse_statement()
                 .expect("do/while statements must have a body");
@@ -435,15 +411,10 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
             self.expect(TokenKind::RParen);
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::DoWhile(Box::new(content), expr),
-                },
-                span.to(self.prev_token.span()),
-            ));
-        }
-
-        if self.eat_symbol(kw::For) {
+            Statement {
+                kind: StatementKind::DoWhile(Box::new(content), expr),
+            }
+        } else if self.eat_symbol(kw::For) {
             self.expect(TokenKind::LParen);
             // TODO: support for (i = 1; ...)
             let init = if self.eat(TokenKind::Semicolon) {
@@ -520,72 +491,43 @@ impl<'a> Parser<'a> {
                 StatementKind::For(init, test, update, Box::new(content))
             };
 
-            return Some(Spanned::new(
-                Statement { kind },
-                span.to(self.prev_token.span()),
-            ));
-        }
-
-        if let Some(tokens) = self.eat_many(&[TokenKind::Ident, TokenKind::Colon]) {
+            Statement { kind }
+        } else if let Some(tokens) = self.eat_many(&[TokenKind::Ident, TokenKind::Colon]) {
             let stmt = self
                 .parse_statement()
                 .expect("label must be followed by a statement");
             assert_eq!(tokens.len(), 2);
             let ident = Symbol::intern(tokens[1].source_string(self.src()));
             let span = span.to(stmt.span());
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::Labeled(ident, Box::new(stmt)),
-                },
-                span,
-            ));
-        }
-
-        if self.eat_symbol(kw::Break) {
+            Statement {
+                kind: StatementKind::Labeled(ident, Box::new(stmt)),
+            }
+        } else if self.eat_symbol(kw::Break) {
             let ident = self.eat_ident();
             self.eat(TokenKind::Semicolon);
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::Break(ident),
-                },
-                span.to(self.prev_token.span()),
-            ));
-        }
 
-        if self.eat_symbol(kw::Continue) {
+            Statement {
+                kind: StatementKind::Break(ident),
+            }
+        } else if self.eat_symbol(kw::Continue) {
             let ident = self.eat_ident();
             self.eat(TokenKind::Semicolon);
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::Continue(ident),
-                },
-                span.to(self.prev_token.span()),
-            ));
-        }
-
-        if self.eat_symbol(kw::Return) {
+            Statement {
+                kind: StatementKind::Continue(ident),
+            }
+        } else if self.eat_symbol(kw::Return) {
             let expr = self.try_parse_expression();
             self.eat(TokenKind::Semicolon);
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::Return(expr),
-                },
-                span.to(self.prev_token.span()),
-            ));
-        }
-
-        if self.eat_symbol(kw::Throw) {
+            Statement {
+                kind: StatementKind::Return(expr),
+            }
+        } else if self.eat_symbol(kw::Throw) {
             let expr = self.parse_expression();
             self.eat(TokenKind::Semicolon);
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::Throw(expr),
-                },
-                span.to(self.prev_token.span()),
-            ));
-        }
-
-        if self.eat_symbol(kw::Function) {
+            Statement {
+                kind: StatementKind::Throw(expr),
+            }
+        } else if self.eat_symbol(kw::Function) {
             let name = self.expect_ident();
             self.expect(TokenKind::LParen);
             let (params, rest) = self.parse_function_params();
@@ -594,41 +536,34 @@ impl<'a> Parser<'a> {
             let body = std::iter::from_fn(|| self.parse_statement()).collect();
             self.expect(TokenKind::RBrace);
             let span = span.to(self.prev_token.span());
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::FunctionDeclaration(Spanned::new(
-                        Function {
-                            name: Some(name),
-                            params,
-                            rest,
-                            body,
-                        },
-                        span,
-                    )),
-                },
-                span,
-            ));
-        }
-
-        if let Some(decl) = self.parse_variable_declaration() {
-            self.eat(TokenKind::Semicolon);
-            let span = decl.span().to(self.prev_token.span());
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::VariableDeclaration(decl),
-                },
-                span,
-            ));
-        }
-
-        for (kw, kind) in [
-            (kw::Var, VariableKind::Var),
-            (kw::Let, VariableKind::Let),
-            (kw::Const, VariableKind::Const),
-        ] {
-            if !self.eat_symbol(kw) {
-                continue;
+            Statement {
+                kind: StatementKind::FunctionDeclaration(Spanned::new(
+                    Function {
+                        name: Some(name),
+                        params,
+                        rest,
+                        body,
+                    },
+                    span,
+                )),
             }
+        } else if let Some(decl) = self.parse_variable_declaration() {
+            self.eat(TokenKind::Semicolon);
+            Statement {
+                kind: StatementKind::VariableDeclaration(decl),
+            }
+        } else if matches!(self.token.kind(), TokenKind::Ident)
+            && matches!(self.intern(self.token), kw::Var | kw::Let | kw::Const)
+        {
+            let kind = [
+                (kw::Var, VariableKind::Var),
+                (kw::Let, VariableKind::Let),
+                (kw::Const, VariableKind::Const),
+            ]
+            .iter()
+            .find_map(|&(kw, kind)| self.eat_symbol(kw).then_some(kind))
+            .unwrap();
+
             let mut decls = vec![];
             loop {
                 let sp = self.token.span();
@@ -647,21 +582,16 @@ impl<'a> Parser<'a> {
             let decl_span = span.to(self.prev_token.span());
             self.eat(TokenKind::Semicolon);
             let stmt_span = decl_span.to(self.prev_token.span());
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::VariableDeclaration(Spanned::new(
-                        VariableDeclaration {
-                            declarations: decls,
-                            kind,
-                        },
-                        decl_span,
-                    )),
-                },
-                stmt_span,
-            ));
-        }
-
-        if self.eat_symbol(kw::Switch) {
+            Statement {
+                kind: StatementKind::VariableDeclaration(Spanned::new(
+                    VariableDeclaration {
+                        declarations: decls,
+                        kind,
+                    },
+                    decl_span,
+                )),
+            }
+        } else if self.eat_symbol(kw::Switch) {
             self.expect(TokenKind::LParen);
             let scrutinee = self.parse_expression();
             self.expect(TokenKind::RParen);
@@ -707,15 +637,10 @@ impl<'a> Parser<'a> {
                 ));
             }
             self.expect(TokenKind::RBrace);
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::Switch(scrutinee, cases),
-                },
-                span.to(self.prev_token.span()),
-            ));
-        }
-
-        if self.eat_symbol(kw::Try) {
+            Statement {
+                kind: StatementKind::Switch(scrutinee, cases),
+            }
+        } else if self.eat_symbol(kw::Try) {
             self.expect(TokenKind::LBrace);
             let block = std::iter::from_fn(|| self.parse_statement()).collect();
             self.expect(TokenKind::RBrace);
@@ -745,22 +670,18 @@ impl<'a> Parser<'a> {
                 finally = Some(block);
             }
 
-            return Some(Spanned::new(
-                Statement {
-                    kind: StatementKind::Try(block, catch, finally),
-                },
-                span.to(self.prev_token.span()),
-            ));
-        }
+            Statement {
+                kind: StatementKind::Try(block, catch, finally),
+            }
+        } else {
+            let kind = self
+                .try_parse_expression()
+                .map_or(StatementKind::Empty, StatementKind::Expression);
+            self.eat(TokenKind::Semicolon);
 
-        let kind = self
-            .try_parse_expression()
-            .map_or(StatementKind::Empty, StatementKind::Expression);
-        self.eat(TokenKind::Semicolon);
-        Some(Spanned::new(
-            Statement { kind },
-            span.to(self.prev_token.span()),
-        ))
+            Statement { kind }
+        };
+        Some(Spanned::new(statement, span.to(self.prev_token.span())))
     }
 
     #[track_caller]
