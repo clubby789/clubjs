@@ -498,7 +498,6 @@ impl<'a> Parser<'a> {
                 .expect("label must be followed by a statement");
             assert_eq!(tokens.len(), 2);
             let ident = Symbol::intern(tokens[1].source_string(self.src()));
-            let span = span.to(stmt.span());
             Statement {
                 kind: StatementKind::Labeled(ident, Box::new(stmt)),
             }
@@ -581,7 +580,6 @@ impl<'a> Parser<'a> {
             }
             let decl_span = span.to(self.prev_token.span());
             self.eat(TokenKind::Semicolon);
-            let stmt_span = decl_span.to(self.prev_token.span());
             Statement {
                 kind: StatementKind::VariableDeclaration(Spanned::new(
                     VariableDeclaration {

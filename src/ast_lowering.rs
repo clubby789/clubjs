@@ -1,8 +1,10 @@
 #![allow(unused)]
 
+use bumpalo::Bump;
+
 use crate::{
     ast::{
-        AssignmentOperator, BinaryOperator, ForTarget, LogicalOperator, UnaryOperator,
+        self, AssignmentOperator, BinaryOperator, ForTarget, LogicalOperator, UnaryOperator,
         UpdateOperator, VariableKind,
     },
     intern::Symbol,
@@ -145,3 +147,26 @@ pub enum ForInit<'ir> {
     VariableDeclaration(&'ir VariableDeclaration<'ir>),
     Expression(&'ir Expression<'ir>),
 }
+
+/*
+
+pub struct LoweringContext {
+    arena: Bump,
+}
+
+impl LoweringContext {
+    pub fn new() -> Self {
+        Self {
+            arena: Bump::new()
+        }
+    }
+
+    fn alloc<T>(&self, value: T) -> &T {
+        self.arena.alloc(value)
+    }
+
+    pub fn lower_program(&self, ast: ast::Program) -> &Program {
+        self.alloc(Program { span: ast.sp, body: () })
+    }
+}
+*/
