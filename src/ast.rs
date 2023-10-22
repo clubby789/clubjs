@@ -1,6 +1,7 @@
 use crate::{
     intern::Symbol,
     lex::{kw, Lexer, Token, TokenKind},
+    session::Session,
     span::{SourceMap, Span},
 };
 
@@ -219,7 +220,9 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(source: &'a str) -> Self {
         let mut lexer = Lexer::new(source);
-        crate::SOURCE_MAP.set(SourceMap::from_src(source)).unwrap();
+        crate::SESSION
+            .set(Session::new(SourceMap::from_src(source.to_string())))
+            .unwrap();
         let token = lexer.next_token().unwrap_or_default();
         Self {
             lexer,
@@ -234,7 +237,15 @@ impl<'a> Parser<'a> {
 
     pub fn parse(mut self) -> Program {
         let span = Span::new(0, self.src().len());
-        let body = std::iter::from_fn(|| self.parse_statement()).collect();
+        let body = std::iter::from_fn(|| self.parse_statement()).collect::<Vec<_>>();
+        println!(
+            "{}",
+            crate::SESSION
+                .get()
+                .unwrap()
+                .sourcemap()
+                .render_source_span(body[0].span)
+        );
         Program { span, body }
     }
 
