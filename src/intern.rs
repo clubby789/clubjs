@@ -1,3 +1,4 @@
+use bumpalo::Bump;
 use core::fmt;
 use once_cell::sync::Lazy;
 use std::{
@@ -5,7 +6,6 @@ use std::{
     fmt::{Debug, Display},
     sync::Mutex,
 };
-use typed_arena::Arena;
 
 pub static INTERNER: Lazy<Mutex<Interner>> = Lazy::new(|| Mutex::new(Interner::new()));
 
@@ -51,7 +51,7 @@ impl Display for Symbol {
 
 #[derive(Default)]
 pub struct Interner<'a> {
-    arena: Arena<u8>,
+    arena: Bump,
     strings: Vec<&'a str>,
     names: HashMap<&'a str, Symbol>,
 }
