@@ -206,10 +206,52 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn next_token(&mut self) -> Token {
+    fn skip_whitespace(&mut self) -> bool {
+        let mut skipped = false;
         while self.peek().map_or(false, char::is_whitespace) {
+            skipped = true;
             self.chars.next();
         }
+        skipped
+    }
+
+    fn skip_comments(&mut self) -> bool {
+        let start = self.position();
+        let mut skipped = false;
+        if self.try_eat_str("//") {
+            skipped = true;
+            loop {
+                match self.chars.next() {
+                    Some('\n') | None => break,
+                    _ => (),
+                }
+            }
+        } else if self.try_eat_str("/*") {
+            skipped = true;
+            loop {
+                match self.chars.next() {
+                    Some('*') if self.try_eat('/') => break,
+                    None => {
+                        eprintln!(
+                            "expected a `*/`:\n{}",
+                            crate::SESSION
+                                .get()
+                                .unwrap()
+                                .sourcemap()
+                                .render_source_span(Span::new(start, self.position() - start))
+                        );
+                        std::process::exit(1);
+                    }
+                    _ => (),
+                }
+            }
+        }
+        skipped
+    }
+
+    pub fn next_token(&mut self) -> Token {
+        while self.skip_whitespace() || self.skip_comments() {}
+
         let start = self.position();
         let Some(next) = self.chars.next() else {
             return Token {
