@@ -41,6 +41,10 @@ impl Span {
     pub fn new(start: usize, len: usize) -> Self {
         Self { start, len }
     }
+
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl Debug for Span {
@@ -137,8 +141,12 @@ impl SourceMap {
                 .lookup_col(sp.lo())
                 .checked_sub(1)
                 .expect("columns start at 1");
-            let len = self.source[sp.lo()..sp.hi()].chars().count();
-            return format!("{content}\n{}{}", " ".repeat(start), "~".repeat(len));
+            if sp.is_empty() {
+                return format!("{content}\n{}^", " ".repeat(start));
+            } else {
+                let len = self.source[sp.lo()..sp.hi()].chars().count();
+                return format!("{content}\n{}{}", " ".repeat(start), "~".repeat(len));
+            }
         }
         let mut rendered = String::new();
         for line in start_line..=end_line {

@@ -223,7 +223,7 @@ impl<'a> Parser<'a> {
         crate::SESSION
             .set(Session::new(SourceMap::from_src(source.to_string())))
             .unwrap();
-        let token = lexer.next_token().unwrap_or_default();
+        let token = lexer.next_token();
         Self {
             lexer,
             prev_token: Token::default(),
@@ -238,21 +238,13 @@ impl<'a> Parser<'a> {
     pub fn parse(mut self) -> Program {
         let span = Span::new(0, self.src().len());
         let body = std::iter::from_fn(|| self.parse_statement()).collect::<Vec<_>>();
-        println!(
-            "{}",
-            crate::SESSION
-                .get()
-                .unwrap()
-                .sourcemap()
-                .render_source_span(body[0].span)
-        );
         Program { span, body }
     }
 
     /// Advance to the next token, replacing `prev_token` with token
     /// Returns the old value of `prev_token`
     fn advance(&mut self) -> Token {
-        let tmp = std::mem::replace(&mut self.token, self.lexer.next_token().unwrap_or_default());
+        let tmp = std::mem::replace(&mut self.token, self.lexer.next_token());
         std::mem::replace(&mut self.prev_token, tmp)
     }
 
@@ -284,11 +276,19 @@ impl<'a> Parser<'a> {
     /// Consumes a token of 'kind', panicking if this doesn't match
     #[track_caller]
     fn expect(&mut self, kind: TokenKind) {
-        assert!(
-            self.eat(kind),
-            "expected `{kind:?}`, found `{:?}`",
-            self.token.kind()
-        );
+        if !self.eat(kind) {
+            eprintln!(
+                "expected `{:?}` but found `{:?}`:\n{}",
+                kind,
+                self.token.kind(),
+                crate::SESSION
+                    .get()
+                    .unwrap()
+                    .sourcemap()
+                    .render_source_span(dbg!(self.token.span()))
+            );
+            std::process::exit(1);
+        }
     }
 
     fn intern(&self, token: Token) -> Symbol {

@@ -206,12 +206,18 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn next_token(&mut self) -> Option<Token> {
+    pub fn next_token(&mut self) -> Token {
         while self.peek().map_or(false, char::is_whitespace) {
             self.chars.next();
         }
         let start = self.position();
-        let kind = match self.chars.next()? {
+        let Some(next) = self.chars.next() else {
+            return Token {
+                kind: TokenKind::Eof,
+                span: Span::new(start, 0),
+            };
+        };
+        let kind = match next {
             '[' => TokenKind::LBracket,
             ']' => TokenKind::RBracket,
             '(' => TokenKind::LParen,
@@ -300,9 +306,9 @@ impl<'a> Lexer<'a> {
                 std::process::exit(1);
             }
         };
-        Some(Token {
+        Token {
             kind,
             span: Span::new(start, self.position() - start),
-        })
+        }
     }
 }
