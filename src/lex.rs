@@ -287,7 +287,18 @@ impl<'a> Lexer<'a> {
                 TokenKind::Literal(Literal::String(Symbol::intern(&content)))
             }
 
-            p => unreachable!("couldn't parse at `{p}`"),
+            p => {
+                eprintln!(
+                    "could not parse `{}`:\n{}",
+                    p.escape_unicode(),
+                    crate::SESSION
+                        .get()
+                        .unwrap()
+                        .sourcemap()
+                        .render_source_span(Span::new(start, self.position() - start))
+                );
+                std::process::exit(1);
+            }
         };
         Some(Token {
             kind,
