@@ -1,7 +1,7 @@
 use crate::{
     intern::Symbol,
     lex::{kw, Lexer, Token, TokenKind},
-    span::Span,
+    span::{SourceMap, Span},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -219,6 +219,7 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(source: &'a str) -> Self {
         let mut lexer = Lexer::new(source);
+        crate::SOURCE_MAP.set(SourceMap::from_src(source)).unwrap();
         let token = lexer.next_token().unwrap_or_default();
         Self {
             lexer,
