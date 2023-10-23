@@ -1,4 +1,7 @@
-use std::cell::Cell;
+use std::{
+    cell::Cell,
+    collections::{hash_map::Entry, HashMap},
+};
 
 use crate::{
     intern::Symbol,
@@ -9,7 +12,7 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Program {
-    pub body: Vec<Node<Statement>>,
+    pub body: Block,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18,7 +21,7 @@ pub struct Function {
     pub name: Option<Symbol>,
     pub params: Vec<FunctionParam>,
     pub rest: Option<Symbol>,
-    pub body: Vec<Node<Statement>>,
+    pub body: Block,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -40,6 +43,12 @@ pub enum VariableKind {
     Const,
 }
 
+impl VariableKind {
+    pub fn redeclarable(self) -> bool {
+        matches!(self, Self::Var)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariableDeclarator {
     pub name: Symbol,
@@ -55,12 +64,13 @@ pub struct Statement {
 pub enum StatementKind {
     Empty,
     Debugger,
-    Block(Vec<Node<Statement>>),
+    Block(Block),
     Expression(Node<Expression>),
     If(
         Node<Expression>,
         Box<Node<Statement>>,
         Option<Box<Node<Statement>>>,
+        Scope,
     ),
     Labeled(Symbol, Box<Node<Statement>>),
     Break(Option<Symbol>),
@@ -68,23 +78,39 @@ pub enum StatementKind {
     Switch(Node<Expression>, Vec<Node<SwitchCase>>),
     Return(Option<Node<Expression>>),
     Throw(Node<Expression>),
-    Try(
-        Vec<Node<Statement>>,
-        Option<Node<CatchClause>>,
-        Option<Vec<Node<Statement>>>,
-    ),
+    Try(Block, Option<Node<CatchClause>>, Option<Block>),
     While(Node<Expression>, Box<Node<Statement>>),
     DoWhile(Box<Node<Statement>>, Node<Expression>),
-    For(
-        Option<Node<ForInit>>,
-        Option<Node<Expression>>,
-        Option<Node<Expression>>,
-        Box<Node<Statement>>,
-    ),
-    ForIn(ForTarget, Node<Expression>, Box<Node<Statement>>),
-    ForOf(ForTarget, Node<Expression>, Box<Node<Statement>>),
+    For {
+        init: Option<Node<ForInit>>,
+        test: Option<Node<Expression>>,
+        update: Option<Node<Expression>>,
+        header_scope: Scope,
+        body: Box<Node<Statement>>,
+        body_scope: Scope,
+    },
+    ForIn {
+        target: ForTarget,
+        iter: Node<Expression>,
+        header_scope: Scope,
+        body: Box<Node<Statement>>,
+        body_scope: Scope,
+    },
+    ForOf {
+        target: ForTarget,
+        iter: Node<Expression>,
+        header_scope: Scope,
+        body: Box<Node<Statement>>,
+        body_scope: Scope,
+    },
     VariableDeclaration(Node<VariableDeclaration>),
     FunctionDeclaration(Node<Function>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Block {
+    statements: Vec<Node<Statement>>,
+    scope: Scope,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -195,12 +221,13 @@ pub enum LogicalOperator {
 pub struct SwitchCase {
     pub test: Option<Node<Expression>>,
     pub consequent: Node<Statement>,
+    // FIXME: switch case scopes
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CatchClause {
     pub param: Option<Symbol>,
-    pub block: Vec<Node<Statement>>,
+    pub block: Block,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -222,6 +249,57 @@ pub struct Parser<'a> {
     prev_token: Token,
     token: Token,
     id_counter: Cell<usize>,
+    scopes: Vec<Scope>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Scope(HashMap<Symbol, VariableKind>);
+
+impl Scope {
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    /// Add a given name and variable kind to the scope if it doesn't exist,
+    /// OR if it exists but is reassignable by rhe new variable. Returns `true`
+    /// if a new entry was created.
+    pub fn insert(&mut self, value: Symbol, kind: VariableKind) -> bool {
+        match self.0.entry(value) {
+            Entry::Occupied(mut o) if o.get().redeclarable() && kind.redeclarable() => {
+                o.insert(kind);
+                true
+            }
+            Entry::Vacant(e) => {
+                e.insert(kind);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Add all variables declared in a given declaration to the scope.
+    /// Will throw an error if redeclaring a variable that is not allowed.
+    pub fn add_declaration(&mut self, decl: &VariableDeclaration) {
+        for v in &decl.declarations {
+            assert!(
+                self.insert(v.name, decl.kind),
+                "redeclaration of {}",
+                v.name.as_str()
+            );
+        }
+    }
+}
+
+/// Run parsing code with a new scope, returning the parsed value
+/// and the (maybe) populated scope.
+/// This is a macro to avoid borrow checker errors with nested closures
+/// borrowing self mutably.
+macro_rules! parse_with_scope {
+    ($self:ident : $parse:expr) => {{
+        $self.scopes.push(Scope::new());
+        let value = $parse;
+        (value, $self.scopes.pop().unwrap())
+    }};
 }
 
 impl<'a> Parser<'a> {
@@ -236,6 +314,7 @@ impl<'a> Parser<'a> {
             prev_token: Token::default(),
             token,
             id_counter: Cell::new(0),
+            scopes: vec![Scope::new()],
         }
     }
 
@@ -251,8 +330,8 @@ impl<'a> Parser<'a> {
 
     pub fn parse(mut self) -> Node<Program> {
         let span = Span::new(0, self.src().len());
-        let body = std::iter::from_fn(|| self.parse_statement()).collect::<Vec<_>>();
-        self.alloc_node(Program { body }, span)
+        let block = self.parse_block();
+        self.alloc_node(Program { body: block }, span)
     }
 
     /// Advance to the next token, replacing `prev_token` with token
@@ -379,7 +458,7 @@ impl<'a> Parser<'a> {
                 kind: StatementKind::Debugger,
             }
         } else if self.eat(TokenKind::LBrace) {
-            let block = std::iter::from_fn(|| self.parse_statement()).collect();
+            let block = self.parse_block();
             self.expect(TokenKind::RBrace);
             Statement {
                 kind: StatementKind::Block(block),
@@ -388,15 +467,17 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
             self.expect(TokenKind::RParen);
-            let content = self
-                .parse_statement()
-                .expect("if statements must have a block");
+            let (content, scope) = parse_with_scope!(self:
+                self
+                    .parse_statement()
+                    .expect("if statements must have a block")
+            );
             let alternate = self
                 .eat_symbol(kw::Else)
                 .then(|| self.parse_statement())
                 .flatten();
             Statement {
-                kind: StatementKind::If(expr, Box::new(content), alternate.map(Box::new)),
+                kind: StatementKind::If(expr, Box::new(content), alternate.map(Box::new), scope),
             }
         } else if self.eat_symbol(kw::While) {
             self.expect(TokenKind::LParen);
@@ -422,16 +503,15 @@ impl<'a> Parser<'a> {
             }
         } else if self.eat_symbol(kw::For) {
             self.expect(TokenKind::LParen);
-            // TODO: support for (i = 1; ...)
+            let mut header_scope = Scope::new();
             let init = if self.eat(TokenKind::Semicolon) {
                 None
             } else {
                 Some(if let Some(decl) = self.parse_variable_declaration() {
-                    let (decl, span) = decl.consume();
-                    self.alloc_node(ForInit::VariableDeclaration(decl), span)
+                    header_scope.add_declaration(&decl);
+                    decl.map(ForInit::VariableDeclaration)
                 } else {
-                    let (expr, span) = self.parse_expression().consume();
-                    self.alloc_node(ForInit::Expression(expr), span)
+                    self.parse_expression().map(ForInit::Expression)
                 })
             };
 
@@ -463,17 +543,29 @@ impl<'a> Parser<'a> {
             let kind = if self.eat_symbol(kw::Of) {
                 let expr = self.parse_expression();
                 self.expect(TokenKind::RParen);
-                let content = self
+                let (content, body_scope) = parse_with_scope!(self:self
                     .parse_statement()
-                    .expect("for/of loops must have a body");
-                StatementKind::ForOf(get_target("for/of"), expr, Box::new(content))
+                    .expect("for/of loops must have a body"));
+                StatementKind::ForOf {
+                    target: get_target("for/of"),
+                    iter: expr,
+                    header_scope,
+                    body: Box::new(content),
+                    body_scope,
+                }
             } else if self.eat_symbol(kw::In) {
                 let expr = self.parse_expression();
                 self.expect(TokenKind::RParen);
-                let content = self
+                let (content, body_scope) = parse_with_scope!(self:self
                     .parse_statement()
-                    .expect("for/in loops must have a body");
-                StatementKind::ForIn(get_target("for/each"), expr, Box::new(content))
+                    .expect("for/in loops must have a body"));
+                StatementKind::ForIn {
+                    header_scope,
+                    target: get_target("for/in"),
+                    iter: expr,
+                    body: Box::new(content),
+                    body_scope,
+                }
             } else {
                 // If init was empty or a declaration, we will have already consumed the semicolon.
                 // Otherwise, do it now
@@ -493,8 +585,17 @@ impl<'a> Parser<'a> {
                     Some(self.parse_expression())
                 };
                 self.expect(TokenKind::RParen);
-                let content = self.parse_statement().expect("for loops must have a body");
-                StatementKind::For(init, test, update, Box::new(content))
+                let (content, body_scope) = parse_with_scope!(self:self
+                    .parse_statement()
+                    .expect("for loops must have a body"));
+                StatementKind::For {
+                    header_scope,
+                    init,
+                    test,
+                    update,
+                    body: Box::new(content),
+                    body_scope,
+                }
             };
 
             Statement { kind }
@@ -538,7 +639,7 @@ impl<'a> Parser<'a> {
             let (params, rest) = self.parse_function_params();
             self.expect(TokenKind::RParen);
             self.expect(TokenKind::LBrace);
-            let body = std::iter::from_fn(|| self.parse_statement()).collect();
+            let block = self.parse_block();
             self.expect(TokenKind::RBrace);
             let span = span.to(self.prev_token.span());
             Statement {
@@ -547,53 +648,19 @@ impl<'a> Parser<'a> {
                         name: Some(name),
                         params,
                         rest,
-                        body,
+                        body: block,
                     },
                     span,
                 )),
             }
         } else if let Some(decl) = self.parse_variable_declaration() {
             self.eat(TokenKind::Semicolon);
+            self.scopes
+                .last_mut()
+                .expect("there should always be at least one scope")
+                .add_declaration(&decl);
             Statement {
                 kind: StatementKind::VariableDeclaration(decl),
-            }
-        } else if matches!(self.token.kind(), TokenKind::Ident)
-            && matches!(self.intern(self.token), kw::Var | kw::Let | kw::Const)
-        {
-            let kind = [
-                (kw::Var, VariableKind::Var),
-                (kw::Let, VariableKind::Let),
-                (kw::Const, VariableKind::Const),
-            ]
-            .iter()
-            .find_map(|&(kw, kind)| self.eat_symbol(kw).then_some(kind))
-            .unwrap();
-
-            let mut decls = vec![];
-            loop {
-                let sp = self.token.span();
-                let name = self.expect_ident();
-                let init = self
-                    .eat(TokenKind::Equals)
-                    .then(|| self.parse_expression_precedence(Precedence::COMMA));
-                decls.push(self.alloc_node(
-                    VariableDeclarator { name, init },
-                    sp.to(self.prev_token.span()),
-                ));
-                if !self.eat(TokenKind::Comma) {
-                    break;
-                }
-            }
-            let decl_span = span.to(self.prev_token.span());
-            self.eat(TokenKind::Semicolon);
-            Statement {
-                kind: StatementKind::VariableDeclaration(self.alloc_node(
-                    VariableDeclaration {
-                        declarations: decls,
-                        kind,
-                    },
-                    decl_span,
-                )),
             }
         } else if self.eat_symbol(kw::Switch) {
             self.expect(TokenKind::LParen);
@@ -646,7 +713,7 @@ impl<'a> Parser<'a> {
             }
         } else if self.eat_symbol(kw::Try) {
             self.expect(TokenKind::LBrace);
-            let block = std::iter::from_fn(|| self.parse_statement()).collect();
+            let block = self.parse_block();
             self.expect(TokenKind::RBrace);
             let mut catch = None;
             let mut finally = None;
@@ -659,7 +726,21 @@ impl<'a> Parser<'a> {
                     sym
                 });
                 self.expect(TokenKind::LBrace);
-                let block = std::iter::from_fn(|| self.parse_statement()).collect();
+                // inline parse_block here because we need to add the catch variable to the scope
+                let block = {
+                    let (statements, scope) = parse_with_scope! {self:
+                        {
+                            if let Some(sym) = param {
+                                self.scopes
+                                    .last_mut()
+                                    .expect("there should always be one scope")
+                                    .insert(sym, VariableKind::Var);
+                            }
+                            std::iter::from_fn(|| self.parse_statement()).collect()
+                        }
+                    };
+                    Block { statements, scope }
+                };
                 self.expect(TokenKind::RBrace);
                 catch = Some(self.alloc_node(
                     CatchClause { param, block },
@@ -669,7 +750,7 @@ impl<'a> Parser<'a> {
 
             if self.eat_symbol(kw::Finally) {
                 self.expect(TokenKind::LBrace);
-                let block = std::iter::from_fn(|| self.parse_statement()).collect();
+                let block = self.parse_block();
                 self.expect(TokenKind::RBrace);
                 finally = Some(block);
             }
@@ -686,6 +767,13 @@ impl<'a> Parser<'a> {
             Statement { kind }
         };
         Some(self.alloc_node(statement, span.to(self.prev_token.span())))
+    }
+
+    fn parse_block(&mut self) -> Block {
+        let (statements, scope) = parse_with_scope! { self:
+            std::iter::from_fn(|| self.parse_statement()).collect()
+        };
+        Block { statements, scope }
     }
 
     #[track_caller]
@@ -1074,7 +1162,7 @@ impl<'a> Parser<'a> {
         let (params, rest) = self.parse_function_params();
         self.expect(TokenKind::RParen);
         self.expect(TokenKind::LBrace);
-        let body = std::iter::from_fn(|| self.parse_statement()).collect();
+        let body = self.parse_block();
         self.expect(TokenKind::RBrace);
         let span = start.to(self.prev_token.span());
         self.alloc_node(
@@ -1123,9 +1211,22 @@ impl<'a> Parser<'a> {
         } else {
             return None;
         };
-        let body = self
-            .parse_statement()
-            .expect("arrow functions require a body");
+        let body = if matches!(self.token.kind(), TokenKind::LBrace) {
+            self.parse_block()
+        } else {
+            let expr = self.parse_expression();
+            let span = expr.span();
+            Block {
+                statements: vec![self.alloc_node(
+                    Statement {
+                        kind: StatementKind::Expression(expr),
+                    },
+                    span,
+                )],
+                scope: Scope::new(),
+            }
+        };
+
         let span = span.to(self.prev_token.span());
         Some(self.alloc_node(
             Expression {
@@ -1134,7 +1235,7 @@ impl<'a> Parser<'a> {
                         name: None,
                         params,
                         rest,
-                        body: vec![body],
+                        body,
                     },
                     span,
                 )),

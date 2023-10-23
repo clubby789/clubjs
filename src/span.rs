@@ -204,8 +204,15 @@ impl<T> Node<T> {
         self.span
     }
 
-    pub fn consume(self) -> (T, Span) {
-        (self.item, self.span)
+    pub fn map<F, U>(self, f: F) -> Node<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        Node {
+            id: self.id,
+            span: self.span,
+            item: f(self.item),
+        }
     }
 }
 
