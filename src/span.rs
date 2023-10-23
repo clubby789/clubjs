@@ -177,16 +177,23 @@ impl SourceMap {
     }
 }
 
-/// Generic wrapper to add spans to types to avoid adding a getter to every node
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Spanned<T> {
+/// Generic wrapper to add spans and IDs to types to avoid adding a getter to every node
+#[derive(Clone, Copy, Debug, Eq)]
+pub struct Node<T> {
+    id: usize,
     item: T,
     span: Span,
 }
 
-impl<T> Spanned<T> {
-    pub fn new(item: T, span: Span) -> Self {
-        Self { item, span }
+impl<T> PartialEq for Node<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<T> Node<T> {
+    pub fn new(id: usize, item: T, span: Span) -> Self {
+        Self { id, item, span }
     }
 
     pub fn item(&self) -> &T {
@@ -202,7 +209,7 @@ impl<T> Spanned<T> {
     }
 }
 
-impl<T> std::ops::Deref for Spanned<T> {
+impl<T> std::ops::Deref for Node<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {

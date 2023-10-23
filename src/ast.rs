@@ -1,13 +1,15 @@
+use std::cell::Cell;
+
 use crate::{
     intern::Symbol,
     lex::{kw, Lexer, Token, TokenKind},
     session::Session,
-    span::{SourceMap, Span, Spanned},
+    span::{Node, SourceMap, Span},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Program {
-    body: Vec<Spanned<Statement>>,
+    body: Vec<Node<Statement>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,18 +18,18 @@ pub struct Function {
     name: Option<Symbol>,
     params: Vec<FunctionParam>,
     rest: Option<Symbol>,
-    body: Vec<Spanned<Statement>>,
+    body: Vec<Node<Statement>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FunctionParam {
     Normal(Symbol),
-    Defaulted(Symbol, Spanned<Expression>),
+    Defaulted(Symbol, Node<Expression>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariableDeclaration {
-    declarations: Vec<Spanned<VariableDeclarator>>,
+    declarations: Vec<Node<VariableDeclarator>>,
     kind: VariableKind,
 }
 
@@ -41,7 +43,7 @@ pub enum VariableKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariableDeclarator {
     name: Symbol,
-    init: Option<Spanned<Expression>>,
+    init: Option<Node<Expression>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,36 +55,36 @@ pub struct Statement {
 pub enum StatementKind {
     Empty,
     Debugger,
-    Block(Vec<Spanned<Statement>>),
-    Expression(Spanned<Expression>),
+    Block(Vec<Node<Statement>>),
+    Expression(Node<Expression>),
     If(
-        Spanned<Expression>,
-        Box<Spanned<Statement>>,
-        Option<Box<Spanned<Statement>>>,
+        Node<Expression>,
+        Box<Node<Statement>>,
+        Option<Box<Node<Statement>>>,
     ),
-    Labeled(Symbol, Box<Spanned<Statement>>),
+    Labeled(Symbol, Box<Node<Statement>>),
     Break(Option<Symbol>),
     Continue(Option<Symbol>),
-    Switch(Spanned<Expression>, Vec<Spanned<SwitchCase>>),
-    Return(Option<Spanned<Expression>>),
-    Throw(Spanned<Expression>),
+    Switch(Node<Expression>, Vec<Node<SwitchCase>>),
+    Return(Option<Node<Expression>>),
+    Throw(Node<Expression>),
     Try(
-        Vec<Spanned<Statement>>,
-        Option<Spanned<CatchClause>>,
-        Option<Vec<Spanned<Statement>>>,
+        Vec<Node<Statement>>,
+        Option<Node<CatchClause>>,
+        Option<Vec<Node<Statement>>>,
     ),
-    While(Spanned<Expression>, Box<Spanned<Statement>>),
-    DoWhile(Box<Spanned<Statement>>, Spanned<Expression>),
+    While(Node<Expression>, Box<Node<Statement>>),
+    DoWhile(Box<Node<Statement>>, Node<Expression>),
     For(
-        Option<Spanned<ForInit>>,
-        Option<Spanned<Expression>>,
-        Option<Spanned<Expression>>,
-        Box<Spanned<Statement>>,
+        Option<Node<ForInit>>,
+        Option<Node<Expression>>,
+        Option<Node<Expression>>,
+        Box<Node<Statement>>,
     ),
-    ForIn(ForTarget, Spanned<Expression>, Box<Spanned<Statement>>),
-    ForOf(ForTarget, Spanned<Expression>, Box<Spanned<Statement>>),
-    VariableDeclaration(Spanned<VariableDeclaration>),
-    FunctionDeclaration(Spanned<Function>),
+    ForIn(ForTarget, Node<Expression>, Box<Node<Statement>>),
+    ForOf(ForTarget, Node<Expression>, Box<Node<Statement>>),
+    VariableDeclaration(Node<VariableDeclaration>),
+    FunctionDeclaration(Node<Function>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,32 +95,28 @@ pub struct Expression {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExpressionKind {
     This,
-    Array(Vec<Spanned<Expression>>),
-    Object(Vec<(Symbol, Option<Spanned<Expression>>)>),
-    Function(Spanned<Function>),
-    Arrow(Spanned<Function>),
-    Unary(UnaryOperator, Box<Spanned<Expression>>),
-    Binary(
-        Box<Spanned<Expression>>,
-        BinaryOperator,
-        Box<Spanned<Expression>>,
-    ),
-    Assignment(Symbol, AssignmentOperator, Box<Spanned<Expression>>),
+    Array(Vec<Node<Expression>>),
+    Object(Vec<(Symbol, Option<Node<Expression>>)>),
+    Function(Node<Function>),
+    Arrow(Node<Function>),
+    Unary(UnaryOperator, Box<Node<Expression>>),
+    Binary(Box<Node<Expression>>, BinaryOperator, Box<Node<Expression>>),
+    Assignment(Symbol, AssignmentOperator, Box<Node<Expression>>),
     /// the bool is true if the operator is a prefix
-    Update(Box<Spanned<Expression>>, UpdateOperator, bool),
+    Update(Box<Node<Expression>>, UpdateOperator, bool),
     Logical(
-        Box<Spanned<Expression>>,
+        Box<Node<Expression>>,
         LogicalOperator,
-        Box<Spanned<Expression>>,
+        Box<Node<Expression>>,
     ),
     Ternary {
-        test: Box<Spanned<Expression>>,
-        consequent: Box<Spanned<Expression>>,
-        alternate: Box<Spanned<Expression>>,
+        test: Box<Node<Expression>>,
+        consequent: Box<Node<Expression>>,
+        alternate: Box<Node<Expression>>,
     },
-    New(Box<Spanned<Expression>>),
-    Call(Box<Spanned<Expression>>, Vec<Spanned<Expression>>),
-    Member(Box<Spanned<Expression>>, MemberKey),
+    New(Box<Node<Expression>>),
+    Call(Box<Node<Expression>>, Vec<Node<Expression>>),
+    Member(Box<Node<Expression>>, MemberKey),
     // TODO: Support yield and generators
     // Yield(Option<Box<Spanned<Expression>>>),
     Literal(crate::lex::Literal),
@@ -128,7 +126,7 @@ pub enum ExpressionKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MemberKey {
     Static(Symbol),
-    Computed(Box<Spanned<Expression>>),
+    Computed(Box<Node<Expression>>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -195,14 +193,14 @@ pub enum LogicalOperator {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SwitchCase {
-    test: Option<Spanned<Expression>>,
-    consequent: Spanned<Statement>,
+    test: Option<Node<Expression>>,
+    consequent: Node<Statement>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CatchClause {
     param: Option<Symbol>,
-    block: Vec<Spanned<Statement>>,
+    block: Vec<Node<Statement>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -223,6 +221,7 @@ pub struct Parser<'a> {
     lexer: Lexer<'a>,
     prev_token: Token,
     token: Token,
+    id_counter: Cell<usize>,
 }
 
 impl<'a> Parser<'a> {
@@ -236,6 +235,7 @@ impl<'a> Parser<'a> {
             lexer,
             prev_token: Token::default(),
             token,
+            id_counter: Cell::new(0),
         }
     }
 
@@ -243,10 +243,16 @@ impl<'a> Parser<'a> {
         self.lexer.src()
     }
 
-    pub fn parse(mut self) -> Spanned<Program> {
+    fn alloc_node<T>(&self, value: T, span: Span) -> Node<T> {
+        let id = self.id_counter.get();
+        self.id_counter.set(id.checked_add(1).unwrap());
+        Node::new(id, value, span)
+    }
+
+    pub fn parse(mut self) -> Node<Program> {
         let span = Span::new(0, self.src().len());
         let body = std::iter::from_fn(|| self.parse_statement()).collect::<Vec<_>>();
-        Spanned::new(Program { body }, span)
+        self.alloc_node(Program { body }, span)
     }
 
     /// Advance to the next token, replacing `prev_token` with token
@@ -358,7 +364,7 @@ impl<'a> Parser<'a> {
         lookahead
     }
 
-    fn parse_statement(&mut self) -> Option<Spanned<Statement>> {
+    fn parse_statement(&mut self) -> Option<Node<Statement>> {
         if matches!(self.token.kind(), TokenKind::Eof | TokenKind::RBrace) {
             return None;
         }
@@ -422,10 +428,10 @@ impl<'a> Parser<'a> {
             } else {
                 Some(if let Some(decl) = self.parse_variable_declaration() {
                     let (decl, span) = decl.consume();
-                    Spanned::new(ForInit::VariableDeclaration(decl), span)
+                    self.alloc_node(ForInit::VariableDeclaration(decl), span)
                 } else {
                     let (expr, span) = self.parse_expression().consume();
-                    Spanned::new(ForInit::Expression(expr), span)
+                    self.alloc_node(ForInit::Expression(expr), span)
                 })
             };
 
@@ -536,7 +542,7 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::RBrace);
             let span = span.to(self.prev_token.span());
             Statement {
-                kind: StatementKind::FunctionDeclaration(Spanned::new(
+                kind: StatementKind::FunctionDeclaration(self.alloc_node(
                     Function {
                         name: Some(name),
                         params,
@@ -570,7 +576,7 @@ impl<'a> Parser<'a> {
                 let init = self
                     .eat(TokenKind::Equals)
                     .then(|| self.parse_expression_precedence(Precedence::COMMA));
-                decls.push(Spanned::new(
+                decls.push(self.alloc_node(
                     VariableDeclarator { name, init },
                     sp.to(self.prev_token.span()),
                 ));
@@ -581,7 +587,7 @@ impl<'a> Parser<'a> {
             let decl_span = span.to(self.prev_token.span());
             self.eat(TokenKind::Semicolon);
             Statement {
-                kind: StatementKind::VariableDeclaration(Spanned::new(
+                kind: StatementKind::VariableDeclaration(self.alloc_node(
                     VariableDeclaration {
                         declarations: decls,
                         kind,
@@ -613,7 +619,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::Colon);
                 // Special case for empty cases
                 let consequent = if matches!(self.peek_ident(), Some(kw::Case | kw::Default)) {
-                    Spanned::new(
+                    self.alloc_node(
                         Statement {
                             kind: StatementKind::Empty,
                         },
@@ -621,7 +627,7 @@ impl<'a> Parser<'a> {
                     )
                 } else {
                     self.parse_statement().unwrap_or_else(|| {
-                        Spanned::new(
+                        self.alloc_node(
                             Statement {
                                 kind: StatementKind::Empty,
                             },
@@ -629,7 +635,7 @@ impl<'a> Parser<'a> {
                         )
                     })
                 };
-                cases.push(Spanned::new(
+                cases.push(self.alloc_node(
                     SwitchCase { test, consequent },
                     span.to(self.prev_token.span()),
                 ));
@@ -655,7 +661,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::LBrace);
                 let block = std::iter::from_fn(|| self.parse_statement()).collect();
                 self.expect(TokenKind::RBrace);
-                catch = Some(Spanned::new(
+                catch = Some(self.alloc_node(
                     CatchClause { param, block },
                     span.to(self.prev_token.span()),
                 ));
@@ -679,25 +685,25 @@ impl<'a> Parser<'a> {
 
             Statement { kind }
         };
-        Some(Spanned::new(statement, span.to(self.prev_token.span())))
+        Some(self.alloc_node(statement, span.to(self.prev_token.span())))
     }
 
     #[track_caller]
-    fn parse_expression(&mut self) -> Spanned<Expression> {
+    fn parse_expression(&mut self) -> Node<Expression> {
         self.parse_expression_precedence(Precedence::TERNARY)
     }
 
-    fn try_parse_expression(&mut self) -> Option<Spanned<Expression>> {
+    fn try_parse_expression(&mut self) -> Option<Node<Expression>> {
         self.try_parse_expression_precedence(Precedence::TERNARY)
     }
 
     #[track_caller]
-    fn parse_expression_precedence(&mut self, prec: Precedence) -> Spanned<Expression> {
+    fn parse_expression_precedence(&mut self, prec: Precedence) -> Node<Expression> {
         self.try_parse_expression_precedence(prec)
             .expect("expected expression")
     }
 
-    fn try_parse_expression_precedence(&mut self, prec: Precedence) -> Option<Spanned<Expression>> {
+    fn try_parse_expression_precedence(&mut self, prec: Precedence) -> Option<Node<Expression>> {
         let rule = self.get_rule(self.token);
         let func = rule.prefix?;
         self.advance();
@@ -817,7 +823,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_variable_declaration(&mut self) -> Option<Spanned<VariableDeclaration>> {
+    fn parse_variable_declaration(&mut self) -> Option<Node<VariableDeclaration>> {
         for (kw, kind) in [
             (kw::Var, VariableKind::Var),
             (kw::Let, VariableKind::Let),
@@ -834,7 +840,7 @@ impl<'a> Parser<'a> {
                 let init = self
                     .eat(TokenKind::Equals)
                     .then(|| self.parse_expression_precedence(Precedence::COMMA));
-                decls.push(Spanned::new(
+                decls.push(self.alloc_node(
                     VariableDeclarator { name, init },
                     sp.to(self.prev_token.span()),
                 ));
@@ -844,7 +850,7 @@ impl<'a> Parser<'a> {
             }
             let decl_span = span.to(self.prev_token.span());
             self.eat(TokenKind::Semicolon);
-            return Some(Spanned::new(
+            return Some(self.alloc_node(
                 VariableDeclaration {
                     declarations: decls,
                     kind,
@@ -855,7 +861,7 @@ impl<'a> Parser<'a> {
         None
     }
 
-    fn parse_unary(&mut self) -> Spanned<Expression> {
+    fn parse_unary(&mut self) -> Node<Expression> {
         let op = match self.prev_token.kind() {
             TokenKind::Plus => UnaryOperator::Plus,
             TokenKind::Minus => UnaryOperator::Minus,
@@ -870,7 +876,7 @@ impl<'a> Parser<'a> {
         let op_span = self.prev_token.span();
         let expr = self.parse_expression_precedence(Precedence::UNARY);
         let span = op_span.to(expr.span());
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::Unary(op, Box::new(expr)),
             },
@@ -878,7 +884,7 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_binary(&mut self, left: Spanned<Expression>) -> Spanned<Expression> {
+    fn parse_binary(&mut self, left: Node<Expression>) -> Node<Expression> {
         let op = match self.prev_token.kind() {
             TokenKind::EqualsEquals => BinaryOperator::EqEq,
             TokenKind::EqualsEqualsEquals => BinaryOperator::EqEqEq,
@@ -909,7 +915,7 @@ impl<'a> Parser<'a> {
         let rule = self.get_rule(self.prev_token);
         let right = self.parse_expression_precedence(rule.precedence.next());
         let span = left.span().to(right.span());
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::Binary(Box::new(left), op, Box::new(right)),
             },
@@ -917,7 +923,7 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_logical(&mut self, left: Spanned<Expression>) -> Spanned<Expression> {
+    fn parse_logical(&mut self, left: Node<Expression>) -> Node<Expression> {
         let op = match self.prev_token.kind() {
             TokenKind::BarBar => LogicalOperator::Or,
             TokenKind::AndAnd => LogicalOperator::And,
@@ -926,7 +932,7 @@ impl<'a> Parser<'a> {
         let rule = self.get_rule(self.prev_token);
         let right = self.parse_expression_precedence(rule.precedence.next());
         let span = left.span().to(right.span());
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::Logical(Box::new(left), op, Box::new(right)),
             },
@@ -934,14 +940,14 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_postfix(&mut self, left: Spanned<Expression>) -> Spanned<Expression> {
+    fn parse_postfix(&mut self, left: Node<Expression>) -> Node<Expression> {
         let op = match self.prev_token.kind() {
             TokenKind::PlusPlus => UpdateOperator::PlusPlus,
             TokenKind::MinusMinus => UpdateOperator::MinusMinus,
             _ => unreachable!(),
         };
         let span = left.span().to(self.prev_token.span());
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::Update(Box::new(left), op, false),
             },
@@ -949,12 +955,12 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_identifier(&mut self) -> Spanned<Expression> {
+    fn parse_identifier(&mut self) -> Node<Expression> {
         // could be a single-arg arrow function
         if let Some(arrow) = self.try_parse_arrow_expression() {
             return arrow;
         }
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::Identifier(Symbol::intern(
                     self.prev_token.source_string(self.src()),
@@ -964,8 +970,8 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_this(&mut self) -> Spanned<Expression> {
-        Spanned::new(
+    fn parse_this(&mut self) -> Node<Expression> {
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::This,
             },
@@ -973,11 +979,11 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_literal(&mut self) -> Spanned<Expression> {
+    fn parse_literal(&mut self) -> Node<Expression> {
         let TokenKind::Literal(lit) = self.prev_token.kind() else {
             unreachable!()
         };
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::Literal(lit),
             },
@@ -985,11 +991,11 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_array(&mut self) -> Spanned<Expression> {
+    fn parse_array(&mut self) -> Node<Expression> {
         let start = self.prev_token.span();
         let exprs = self.parse_delimited_list(TokenKind::Comma, Self::try_parse_expression);
         self.expect(TokenKind::RBracket);
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::Array(exprs),
             },
@@ -997,12 +1003,12 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_object(&mut self) -> Spanned<Expression> {
+    fn parse_object(&mut self) -> Node<Expression> {
         let start = self.prev_token.span();
         let props = self.parse_delimited_list(TokenKind::Comma, Self::parse_object_prop);
 
         self.expect(TokenKind::RBrace);
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::Object(props),
             },
@@ -1010,7 +1016,7 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_object_prop(&mut self) -> Option<(Symbol, Option<Spanned<Expression>>)> {
+    fn parse_object_prop(&mut self) -> Option<(Symbol, Option<Node<Expression>>)> {
         let ident = self.eat_ident()?;
         Some((
             ident,
@@ -1018,7 +1024,7 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    fn parse_member(&mut self, left: Spanned<Expression>) -> Spanned<Expression> {
+    fn parse_member(&mut self, left: Node<Expression>) -> Node<Expression> {
         let start = self.prev_token.span();
         let key = match self.prev_token.kind() {
             TokenKind::Dot => MemberKey::Static(self.expect_ident()),
@@ -1029,7 +1035,7 @@ impl<'a> Parser<'a> {
             }
             _ => unreachable!(),
         };
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::Member(Box::new(left), key),
             },
@@ -1037,11 +1043,11 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_call(&mut self, left: Spanned<Expression>) -> Spanned<Expression> {
+    fn parse_call(&mut self, left: Node<Expression>) -> Node<Expression> {
         let start = left.span();
         let args = self.parse_delimited_list(TokenKind::Comma, Self::try_parse_expression);
         self.expect(TokenKind::RParen);
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::Call(Box::new(left), args),
             },
@@ -1049,11 +1055,11 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_new(&mut self) -> Spanned<Expression> {
+    fn parse_new(&mut self) -> Node<Expression> {
         let start = self.prev_token.span();
         let target = self.parse_expression_precedence(Precedence::CALL);
 
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::New(Box::new(target)),
             },
@@ -1061,7 +1067,7 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_function_expression(&mut self) -> Spanned<Expression> {
+    fn parse_function_expression(&mut self) -> Node<Expression> {
         let start = self.prev_token.span();
         let name = self.eat_ident();
         self.expect(TokenKind::LParen);
@@ -1071,9 +1077,9 @@ impl<'a> Parser<'a> {
         let body = std::iter::from_fn(|| self.parse_statement()).collect();
         self.expect(TokenKind::RBrace);
         let span = start.to(self.prev_token.span());
-        Spanned::new(
+        self.alloc_node(
             Expression {
-                kind: ExpressionKind::Function(Spanned::new(
+                kind: ExpressionKind::Function(self.alloc_node(
                     Function {
                         name,
                         params,
@@ -1087,7 +1093,7 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_grouping(&mut self) -> Spanned<Expression> {
+    fn parse_grouping(&mut self) -> Node<Expression> {
         if let Some(expr) = self.try_parse_arrow_expression() {
             return expr;
         }
@@ -1096,7 +1102,7 @@ impl<'a> Parser<'a> {
         expr
     }
 
-    fn try_parse_arrow_expression(&mut self) -> Option<Spanned<Expression>> {
+    fn try_parse_arrow_expression(&mut self) -> Option<Node<Expression>> {
         // non-parenthesised form
         let span = self.prev_token.span();
         let (params, rest) = if let TokenKind::Ident = self.prev_token.kind() {
@@ -1121,9 +1127,9 @@ impl<'a> Parser<'a> {
             .parse_statement()
             .expect("arrow functions require a body");
         let span = span.to(self.prev_token.span());
-        Some(Spanned::new(
+        Some(self.alloc_node(
             Expression {
-                kind: ExpressionKind::Arrow(Spanned::new(
+                kind: ExpressionKind::Arrow(self.alloc_node(
                     Function {
                         name: None,
                         params,
@@ -1153,7 +1159,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_assign_expression(&mut self, left: Spanned<Expression>) -> Spanned<Expression> {
+    fn parse_assign_expression(&mut self, left: Node<Expression>) -> Node<Expression> {
         let op = match self.prev_token.kind() {
             TokenKind::Equals => AssignmentOperator::Eq,
             TokenKind::PlusEquals => AssignmentOperator::PlusEq,
@@ -1175,7 +1181,7 @@ impl<'a> Parser<'a> {
         };
         let right = self.parse_expression_precedence(Precedence::ASSIGNMENT.next());
         let span = left.span().to(right.span());
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::Assignment(var, op, Box::new(right)),
             },
@@ -1183,12 +1189,12 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_ternary(&mut self, left: Spanned<Expression>) -> Spanned<Expression> {
+    fn parse_ternary(&mut self, left: Node<Expression>) -> Node<Expression> {
         let consequent = Box::new(self.parse_expression_precedence(Precedence::TERNARY.next()));
         self.expect(TokenKind::Colon);
         let alternate = Box::new(self.parse_expression_precedence(Precedence::TERNARY.next()));
         let span = left.span().to(self.prev_token.span());
-        Spanned::new(
+        self.alloc_node(
             Expression {
                 kind: ExpressionKind::Ternary {
                     test: Box::new(left),
@@ -1231,8 +1237,8 @@ impl Precedence {
     const GROUPING: Self = Self(18);
 }
 
-type PrefixFn<'b> = for<'a> fn(&'a mut Parser<'b>) -> Spanned<Expression>;
-type InfixFn<'b> = for<'a> fn(&'a mut Parser<'b>, Spanned<Expression>) -> Spanned<Expression>;
+type PrefixFn<'b> = for<'a> fn(&'a mut Parser<'b>) -> Node<Expression>;
+type InfixFn<'b> = for<'a> fn(&'a mut Parser<'b>, Node<Expression>) -> Node<Expression>;
 #[derive(Default, Debug)]
 struct ParseRule<'b> {
     prefix: Option<PrefixFn<'b>>,
