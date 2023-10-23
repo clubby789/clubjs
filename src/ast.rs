@@ -1449,7 +1449,7 @@ impl<'a> Parser<'a> {
                 scope: Scope::new(),
             }
         };
-
+        let span = span.to(self.prev_token.span());
         let func = Function {
             name: None,
             params,
