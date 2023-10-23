@@ -232,7 +232,10 @@ impl<'a> Lexer<'a> {
                 match self.chars.next() {
                     Some('*') if self.try_eat('/') => break,
                     None => {
-                        report_fatal_error("expected a `*/`", Span::new(start, self.position() - start));
+                        report_fatal_error(
+                            "expected a `*/`",
+                            Span::new(start, self.position() - start),
+                        );
                     }
                     _ => (),
                 }

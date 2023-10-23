@@ -193,11 +193,21 @@ impl SourceMap {
 }
 
 /// Generic wrapper to add spans and IDs to types to avoid adding a getter to every node
-#[derive(Clone, Copy, Debug, Eq)]
+#[derive(Clone, Copy, Eq)]
 pub struct Node<T> {
     id: usize,
     item: T,
     span: Span,
+}
+
+impl<T: Debug> Debug for Node<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_char('(')?;
+        Debug::fmt(&self.item, f)?;
+        f.write_char('~')?;
+        Debug::fmt(&self.span, f)?;
+        f.write_char(')')
+    }
 }
 
 impl<T> PartialEq for Node<T> {

@@ -16,5 +16,5 @@ fn main() {
     let src = std::fs::read_to_string(&path).unwrap();
     let p = ast::Parser::new(&src, path);
     // println!("{:#?}", p.parse());
-    p.parse();
+    dbg!(p.parse());
 }

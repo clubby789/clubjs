@@ -1,7 +1,7 @@
 use std::{
     cell::Cell,
     collections::{hash_map::Entry, HashMap},
-    path::PathBuf,
+    path::PathBuf, fmt::Debug,
 };
 
 use crate::{
@@ -114,9 +114,15 @@ pub struct Block {
     scope: Scope,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Expression {
     pub kind: ExpressionKind,
+}
+
+impl Debug for Expression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self.kind, f)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
