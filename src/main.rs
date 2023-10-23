@@ -1,5 +1,4 @@
 mod ast;
-mod ast_lowering;
 mod intern;
 mod lex;
 mod session;
