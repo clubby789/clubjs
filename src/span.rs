@@ -143,10 +143,9 @@ impl SourceMap {
                 .expect("columns start at 1");
             if sp.is_empty() {
                 return format!("{content}\n{}^", " ".repeat(start));
-            } else {
-                let len = self.source[sp.lo()..sp.hi()].chars().count();
-                return format!("{content}\n{}{}", " ".repeat(start), "~".repeat(len));
             }
+            let len = self.source[sp.lo()..sp.hi()].chars().count();
+            return format!("{content}\n{}{}", " ".repeat(start), "~".repeat(len));
         }
         let mut rendered = String::new();
         for line in start_line..=end_line {
