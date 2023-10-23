@@ -490,8 +490,16 @@ impl<'a> Parser<'a> {
             let (content, scope) = parse_with_scope!(self:
                 self
                     .parse_statement()
-                    .expect("if statements must have a block")
+                    .unwrap_or_else(|| report_fatal_error("if statements must have a block", self.token.span()))
             );
+            if let StatementKind::Labeled(_, inner) = &content.kind {
+                if matches!(inner.kind, StatementKind::FunctionDeclaration(..)) {
+                    report_fatal_error(
+                        "functions as the body of an if statement may not be labelled",
+                        inner.span(),
+                    )
+                }
+            }
             let alternate = self
                 .eat_symbol(kw::Else)
                 .then(|| self.parse_statement())
