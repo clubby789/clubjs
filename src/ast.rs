@@ -62,6 +62,17 @@ pub struct Statement {
     pub kind: StatementKind,
 }
 
+impl Statement {
+    pub fn is_labelled_function(&self) -> bool {
+        if let StatementKind::Labeled(_, inner) = &self.kind {
+            if matches!(inner.kind, StatementKind::FunctionDeclaration(..)) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StatementKind {
     Empty,
@@ -501,13 +512,11 @@ impl<'a> Parser<'a> {
                     .parse_statement_or_expr()
                     .unwrap_or_else(|| report_fatal_error("if statements must have a block", self.token.span()))
             );
-            if let StatementKind::Labeled(_, inner) = &content.kind {
-                if matches!(inner.kind, StatementKind::FunctionDeclaration(..)) {
-                    report_fatal_error(
-                        "functions as the body of an if statement may not be labelled",
-                        inner.span(),
-                    )
-                }
+            if content.is_labelled_function() {
+                report_fatal_error(
+                    "functions as the body of an if statement may not be labelled",
+                    content.span(),
+                )
             }
             let alternate = self
                 .eat_symbol(kw::Else)
@@ -523,7 +532,12 @@ impl<'a> Parser<'a> {
             let content = self
                 .parse_statement_or_expr()
                 .unwrap_or_else(|| report_fatal_error("while must have a body", self.token.span()));
-
+            if content.is_labelled_function() {
+                report_fatal_error(
+                    "functions as the body of a while statement may not be labelled",
+                    content.span(),
+                )
+            }
             Statement {
                 kind: StatementKind::While(expr, Box::new(content)),
             }
@@ -531,13 +545,11 @@ impl<'a> Parser<'a> {
             let content = self.parse_statement().unwrap_or_else(|| {
                 report_fatal_error("do/while statements must have a body", self.token.span())
             });
-            if let StatementKind::Labeled(_, inner) = &content.kind {
-                if matches!(inner.kind, StatementKind::FunctionDeclaration(..)) {
-                    report_fatal_error(
-                        "functions as the body of a do/while statement may not be labelled",
-                        inner.span(),
-                    )
-                }
+            if content.is_labelled_function() {
+                report_fatal_error(
+                    "functions as the body of a do/while statement may not be labelled",
+                    content.span(),
+                )
             }
             self.expect_symbol(kw::While);
             self.expect(TokenKind::LParen);
@@ -601,6 +613,12 @@ impl<'a> Parser<'a> {
                 let (content, body_scope) = parse_with_scope!(self:self
                     .parse_statement_or_expr()
                     .unwrap_or_else(|| report_fatal_error("for/of loops must have a body", self.token.span())));
+                if content.is_labelled_function() {
+                    report_fatal_error(
+                        "functions as the body of a for/of statement may not be labelled",
+                        content.span(),
+                    )
+                }
                 StatementKind::ForOf {
                     target: get_target("for/of"),
                     iter: expr,
@@ -614,6 +632,12 @@ impl<'a> Parser<'a> {
                 let (content, body_scope) = parse_with_scope!(self:self
                     .parse_statement_or_expr()
                     .unwrap_or_else(|| report_fatal_error("for/in loops must have a body", self.token.span())));
+                if content.is_labelled_function() {
+                    report_fatal_error(
+                        "functions as the body of a for/in statement may not be labelled",
+                        content.span(),
+                    )
+                }
                 StatementKind::ForIn {
                     header_scope,
                     target: get_target("for/in"),
@@ -643,6 +667,12 @@ impl<'a> Parser<'a> {
                 let (content, body_scope) = parse_with_scope!(self:self
                     .parse_statement_or_expr()
                     .unwrap_or_else(|| report_fatal_error("for loops must have a body", self.token.span())));
+                if content.is_labelled_function() {
+                    report_fatal_error(
+                        "functions as the body of a for statement may not be labelled",
+                        content.span(),
+                    )
+                }
                 StatementKind::For {
                     header_scope,
                     init,
