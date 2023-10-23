@@ -9,16 +9,16 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Program {
-    body: Vec<Node<Statement>>,
+    pub body: Vec<Node<Statement>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Function {
     // May be None for function expressions
-    name: Option<Symbol>,
-    params: Vec<FunctionParam>,
-    rest: Option<Symbol>,
-    body: Vec<Node<Statement>>,
+    pub name: Option<Symbol>,
+    pub params: Vec<FunctionParam>,
+    pub rest: Option<Symbol>,
+    pub body: Vec<Node<Statement>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,8 +29,8 @@ pub enum FunctionParam {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariableDeclaration {
-    declarations: Vec<Node<VariableDeclarator>>,
-    kind: VariableKind,
+    pub declarations: Vec<Node<VariableDeclarator>>,
+    pub kind: VariableKind,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -42,13 +42,13 @@ pub enum VariableKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariableDeclarator {
-    name: Symbol,
-    init: Option<Node<Expression>>,
+    pub name: Symbol,
+    pub init: Option<Node<Expression>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Statement {
-    kind: StatementKind,
+    pub kind: StatementKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,7 +89,7 @@ pub enum StatementKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Expression {
-    kind: ExpressionKind,
+    pub kind: ExpressionKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -193,14 +193,14 @@ pub enum LogicalOperator {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SwitchCase {
-    test: Option<Node<Expression>>,
-    consequent: Node<Statement>,
+    pub test: Option<Node<Expression>>,
+    pub consequent: Node<Statement>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CatchClause {
-    param: Option<Symbol>,
-    block: Vec<Node<Statement>>,
+    pub param: Option<Symbol>,
+    pub block: Vec<Node<Statement>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
