@@ -1432,8 +1432,10 @@ impl<'a> Parser<'a> {
         } else {
             return None;
         };
-        let body = if matches!(self.token.kind(), TokenKind::LBrace) {
-            self.parse_block()
+        let body = if self.eat(TokenKind::LBrace) {
+            let body = self.parse_block();
+            self.expect(TokenKind::RBrace);
+            body
         } else {
             let expr = self.parse_expression();
             let span = expr.span();
