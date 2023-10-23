@@ -415,7 +415,20 @@ impl<'a> Parser<'a> {
 
     #[track_caller]
     fn expect_ident(&mut self) -> Symbol {
-        self.eat_ident().expect("expected an identifier")
+        self.eat_ident()
+            .unwrap_or_else(|| report_fatal_error("expected an identifier", self.prev_token.span()))
+    }
+
+    #[track_caller]
+    fn expect_ident_no_kw(&mut self) -> Symbol {
+        let sym = self.expect_ident();
+        if kw::KEYWORD_NAMES.contains(&sym.as_str()) {
+            report_fatal_error(
+                "expected an identifier, found keyword",
+                self.prev_token.span(),
+            )
+        }
+        sym
     }
 
     fn parse_delimited_list<T>(
@@ -641,7 +654,7 @@ impl<'a> Parser<'a> {
                 kind: StatementKind::Throw(expr),
             }
         } else if self.eat_symbol(kw::Function) {
-            let name = self.expect_ident();
+            let name = self.expect_ident_no_kw();
             self.expect(TokenKind::LParen);
             let (params, rest) = self.parse_function_params();
             self.expect(TokenKind::RParen);
@@ -728,7 +741,7 @@ impl<'a> Parser<'a> {
             if self.eat_symbol(kw::Catch) {
                 let span = self.prev_token.span();
                 let param = self.eat(TokenKind::LParen).then(|| {
-                    let sym = self.eat_ident().expect("expected an identifier");
+                    let sym = self.expect_ident_no_kw();
                     self.expect(TokenKind::RParen);
                     sym
                 });
@@ -932,7 +945,7 @@ impl<'a> Parser<'a> {
             let mut decls = vec![];
             loop {
                 let sp = self.token.span();
-                let name = self.expect_ident();
+                let name = self.expect_ident_no_kw();
                 let init = self
                     .eat(TokenKind::Equals)
                     .then(|| self.parse_expression_precedence(Precedence::COMMA));
@@ -1274,12 +1287,20 @@ impl<'a> Parser<'a> {
     /// Parses function params without parens. Also returns the `rest` param if there was one
     fn parse_function_params(&mut self) -> (Vec<FunctionParam>, Option<Symbol>) {
         let params = self.parse_delimited_list(TokenKind::Comma, Self::parse_function_param);
-        let rest = self.eat(TokenKind::DotDotDot).then(|| self.expect_ident());
+        let rest = self
+            .eat(TokenKind::DotDotDot)
+            .then(|| self.expect_ident_no_kw());
         (params, rest)
     }
 
     fn parse_function_param(&mut self) -> Option<FunctionParam> {
         let ident = self.eat_ident()?;
+        if kw::KEYWORD_NAMES.contains(&ident.as_str()) {
+            report_fatal_error(
+                "expected an identifier, found keyword",
+                self.prev_token.span(),
+            )
+        }
         if self.eat(TokenKind::Equals) {
             Some(FunctionParam::Defaulted(ident, self.parse_expression()))
         } else {
