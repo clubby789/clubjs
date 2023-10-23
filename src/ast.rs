@@ -1543,12 +1543,7 @@ impl<'a> Parser<'a> {
 
 /// Check for early errors in a function.
 /// 1. BoundNames(ParamList).Intersection(LexicallyDefinedNames(body)).len() > 0
-fn check_function_early_errors(
-    Function {
-        params, rest, body, ..
-    }: &Function,
-    span: Span,
-) {
+fn check_function_early_errors(Function { params, body, .. }: &Function, span: Span) {
     // FIXME: move rest into params
     let bound = params.bound_names().collect::<HashSet<_>>();
     for name in body.lexically_declared_names() {
