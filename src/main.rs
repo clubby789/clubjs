@@ -11,8 +11,7 @@ use session::SESSION;
 fn main() {
     let path = std::env::args()
         .nth(1)
-        .map(|a| a.try_into().unwrap())
-        .unwrap_or_else(|| PathBuf::from("src.js"));
+        .map_or_else(|| PathBuf::from("src.js"), |a| a.try_into().unwrap());
     let src = std::fs::read_to_string(&path).unwrap();
     let p = ast::Parser::new(&src, path);
     // println!("{:#?}", p.parse());

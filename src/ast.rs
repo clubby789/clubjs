@@ -160,8 +160,10 @@ pub enum ExpressionKind {
 
 impl ExpressionKind {
     pub fn is_simple_assignment_target(&self) -> bool {
-        use ExpressionKind::*;
-        matches!(self, Identifier(..) | Call(..) | Member(..))
+        matches!(
+            self,
+            ExpressionKind::Identifier(..) | ExpressionKind::Call(..) | ExpressionKind::Member(..)
+        )
     }
 }
 
