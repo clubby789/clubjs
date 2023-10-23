@@ -23,7 +23,12 @@ impl Span {
     }
 
     pub fn to(self, other: Span) -> Self {
-        debug_assert!(other.start >= self.start);
+        debug_assert!(
+            other.start >= self.start,
+            "{:?} is not >= {:?}",
+            other,
+            self
+        );
         Self {
             start: self.start,
             len: (other.start - self.start) + other.len,
@@ -52,7 +57,7 @@ impl Debug for Span {
             let sm = sess.sourcemap();
             write!(
                 f,
-                "{}[{}:{} - {}:{})]",
+                "{}[{}:{} - {}:{}]",
                 sm.path.display(),
                 sm.lookup_line(self.lo()),
                 sm.lookup_col(self.lo()),
