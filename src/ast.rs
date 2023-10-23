@@ -150,6 +150,13 @@ pub enum ExpressionKind {
     Identifier(Symbol),
 }
 
+impl ExpressionKind {
+    pub fn is_simple_assignment_target(&self) -> bool {
+        use ExpressionKind::*;
+        matches!(self, Identifier(..) | Call(..) | Member(..))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MemberKey {
     Static(Symbol),
@@ -758,7 +765,7 @@ impl<'a> Parser<'a> {
 
             Statement { kind }
         };
-        Some(self.alloc_node(statement, span.to(self.prev_token.span())))
+        Some(self.alloc_node(statement, span.to(self.prev_token.span().shrink_to_hi())))
     }
 
     fn parse_block(&mut self) -> Block {
@@ -1021,6 +1028,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_postfix(&mut self, left: Node<Expression>) -> Node<Expression> {
+        if !left.kind.is_simple_assignment_target() {
+            report_fatal_error(
+                "invalid left side of postfix operation",
+                left.span().to(self.prev_token.span()),
+            );
+        }
         let op = match self.prev_token.kind() {
             TokenKind::PlusPlus => UpdateOperator::PlusPlus,
             TokenKind::MinusMinus => UpdateOperator::MinusMinus,
