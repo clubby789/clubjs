@@ -522,7 +522,7 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::RParen);
             let content = self
                 .parse_statement_or_expr()
-                .expect("while loops must have a body");
+                .unwrap_or_else(|| report_fatal_error("while must have a body", self.token.span()));
 
             Statement {
                 kind: StatementKind::While(expr, Box::new(content)),
@@ -548,6 +548,7 @@ impl<'a> Parser<'a> {
             }
         } else if self.eat_symbol(kw::For) {
             self.expect(TokenKind::LParen);
+            let span_for_err = self.prev_token.span();
             let mut header_scope = Scope::new();
             let init = if self.eat(TokenKind::Semicolon) {
                 None
@@ -560,29 +561,38 @@ impl<'a> Parser<'a> {
                 })
             };
 
-            let get_target = |loopkind| match init
-                .as_deref()
-                .unwrap_or_else(|| panic!("{loopkind} must have a target variable"))
-            {
+            let get_target = |loopkind| match init.as_deref().unwrap_or_else(|| {
+                report_fatal_error(
+                    format!("{loopkind} must have a target variable"),
+                    span_for_err,
+                )
+            }) {
                 ForInit::VariableDeclaration(VariableDeclaration {
                     declarations, kind, ..
                 }) => {
-                    assert!(
-                        declarations.len() == 1,
-                        "{loopkind} loops may only have one target variable"
-                    );
+                    if declarations.len() != 1 {
+                        report_fatal_error(
+                            format!("{loopkind} loops may only have one target variable"),
+                            span_for_err,
+                        )
+                    }
                     let decl = &declarations[0];
-                    assert!(
-                        decl.init.is_none(),
-                        "{loopkind} target variables must not have an initializer"
-                    );
+                    if decl.init.is_some() {
+                        report_fatal_error(
+                            format!("{loopkind} target variables must not have an initializer"),
+                            span_for_err,
+                        );
+                    };
                     ForTarget::Declaration(*kind, decl.name)
                 }
                 ForInit::Expression(Expression {
                     kind: ExpressionKind::Identifier(ident),
                     ..
                 }) => ForTarget::Variable(*ident),
-                _ => panic!("invalid target variable in {loopkind}"),
+                _ => report_fatal_error(
+                    format!("invalid target variable in {loopkind}"),
+                    span_for_err,
+                ),
             };
 
             let kind = if self.eat_symbol(kw::Of) {
@@ -590,7 +600,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RParen);
                 let (content, body_scope) = parse_with_scope!(self:self
                     .parse_statement_or_expr()
-                    .expect("for/of loops must have a body"));
+                    .unwrap_or_else(|| report_fatal_error("for/of loops must have a body", self.token.span())));
                 StatementKind::ForOf {
                     target: get_target("for/of"),
                     iter: expr,
@@ -603,7 +613,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RParen);
                 let (content, body_scope) = parse_with_scope!(self:self
                     .parse_statement_or_expr()
-                    .expect("for/in loops must have a body"));
+                    .unwrap_or_else(|| report_fatal_error("for/in loops must have a body", self.token.span())));
                 StatementKind::ForIn {
                     header_scope,
                     target: get_target("for/in"),
@@ -632,7 +642,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RParen);
                 let (content, body_scope) = parse_with_scope!(self:self
                     .parse_statement_or_expr()
-                    .expect("for loops must have a body"));
+                    .unwrap_or_else(|| report_fatal_error("for loops must have a body", self.token.span())));
                 StatementKind::For {
                     header_scope,
                     init,
@@ -645,9 +655,9 @@ impl<'a> Parser<'a> {
 
             Statement { kind }
         } else if let Some(tokens) = self.eat_many(&[TokenKind::Ident, TokenKind::Colon]) {
-            let stmt = self
-                .parse_statement_or_expr()
-                .expect("label must be followed by a statement");
+            let stmt = self.parse_statement_or_expr().unwrap_or_else(|| {
+                report_fatal_error("label must be followed by statement", self.token.span())
+            });
             assert_eq!(tokens.len(), 2);
             let ident = Symbol::intern(tokens[1].source_string(self.src()));
             Statement {
@@ -713,15 +723,17 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::RParen);
             self.expect(TokenKind::LBrace);
             let mut cases = vec![];
-            let mut default = false;
+            let mut default_set = false;
             loop {
                 let span = self.token.span();
                 let test = if self.eat_symbol(kw::Default) {
-                    assert!(
-                        !default,
-                        "more than one `default` clause in a switch statement"
-                    );
-                    default = true;
+                    if default_set {
+                        report_fatal_error(
+                            "more than one `default` clause in a switch statement",
+                            self.prev_token.span(),
+                        )
+                    }
+                    default_set = true;
                     None
                 } else if self.eat_symbol(kw::Case) {
                     Some(self.parse_expression())
@@ -1357,7 +1369,10 @@ impl<'a> Parser<'a> {
         };
         let ExpressionKind::Identifier(var) = left.kind else {
             // TODO: support proper patterns
-            panic!("left-hand side of assignment must be variable")
+            report_fatal_error(
+                "left-hand side of assignment must be variable (for now)",
+                left.span(),
+            );
         };
         let right = self.parse_expression_precedence(Precedence::ASSIGNMENT.next());
         let span = left.span().to(right.span());
