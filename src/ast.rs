@@ -1,6 +1,6 @@
 use std::{
     cell::Cell,
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     fmt::Debug,
     path::PathBuf,
 };
@@ -12,6 +12,16 @@ use crate::{
     span::{Node, SourceMap, Span},
 };
 
+/// Helper trait to get the names bound within an AST node
+trait Names {
+    fn bound_names(&self) -> impl Iterator<Item = Symbol> {
+        self.lexically_declared_names()
+            .chain(self.var_declared_names())
+    }
+    fn lexically_declared_names(&self) -> impl Iterator<Item = Symbol>;
+    fn var_declared_names(&self) -> impl Iterator<Item = Symbol>;
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Program {
     pub body: Block,
@@ -21,9 +31,26 @@ pub struct Program {
 pub struct Function {
     // May be None for function expressions
     pub name: Option<Symbol>,
-    pub params: Vec<FunctionParam>,
+    pub params: ParamList,
     pub rest: Option<Symbol>,
     pub body: Block,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParamList(Vec<FunctionParam>);
+
+impl Names for ParamList {
+    fn lexically_declared_names(&self) -> impl Iterator<Item = Symbol> {
+        std::iter::empty()
+    }
+
+    fn var_declared_names(&self) -> impl Iterator<Item = Symbol> {
+        std::iter::empty()
+    }
+
+    fn bound_names(&self) -> impl Iterator<Item = Symbol> {
+        self.0.iter().map(FunctionParam::name)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,10 +59,40 @@ pub enum FunctionParam {
     Defaulted(Symbol, Node<Expression>),
 }
 
+impl FunctionParam {
+    pub fn name(&self) -> Symbol {
+        match self {
+            FunctionParam::Normal(s) | FunctionParam::Defaulted(s, _) => *s,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariableDeclaration {
     pub declarations: Vec<Node<VariableDeclarator>>,
     pub kind: VariableKind,
+}
+
+impl Names for VariableDeclaration {
+    fn lexically_declared_names(&self) -> impl Iterator<Item = Symbol> {
+        self.kind
+            .lexical()
+            .then_some(self.declarations.iter())
+            .unwrap_or([].iter())
+            .map(|v| v.name)
+    }
+
+    fn var_declared_names(&self) -> impl Iterator<Item = Symbol> {
+        self.kind
+            .var()
+            .then_some(self.declarations.iter())
+            .unwrap_or([].iter())
+            .map(|v| v.name)
+    }
+
+    fn bound_names(&self) -> impl Iterator<Item = Symbol> {
+        self.declarations.iter().map(|v| v.name)
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -48,6 +105,14 @@ pub enum VariableKind {
 impl VariableKind {
     pub fn redeclarable(self) -> bool {
         matches!(self, Self::Var)
+    }
+
+    pub fn var(self) -> bool {
+        matches!(self, Self::Var)
+    }
+
+    pub fn lexical(self) -> bool {
+        matches!(self, Self::Const | Self::Let)
     }
 }
 
@@ -124,6 +189,42 @@ pub enum StatementKind {
 pub struct Block {
     statements: Vec<Node<Statement>>,
     scope: Scope,
+}
+
+impl Names for Block {
+    fn lexically_declared_names(&self) -> impl Iterator<Item = Symbol> {
+        self.statements.lexically_declared_names()
+    }
+
+    fn var_declared_names(&self) -> impl Iterator<Item = Symbol> {
+        self.statements.var_declared_names()
+    }
+}
+
+impl Names for Vec<Node<Statement>> {
+    fn lexically_declared_names(&self) -> impl Iterator<Item = Symbol> {
+        self.iter()
+            .filter_map(|stmt| {
+                if let StatementKind::VariableDeclaration(decl) = &stmt.kind {
+                    Some(decl.lexically_declared_names())
+                } else {
+                    None
+                }
+            })
+            .flatten()
+    }
+
+    fn var_declared_names(&self) -> impl Iterator<Item = Symbol> {
+        self.iter()
+            .filter_map(|stmt| {
+                if let StatementKind::VariableDeclaration(decl) = &stmt.kind {
+                    Some(decl.var_declared_names())
+                } else {
+                    None
+                }
+            })
+            .flatten()
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -694,6 +795,7 @@ impl<'a> Parser<'a> {
                 kind: StatementKind::Labeled(ident, Box::new(stmt)),
             }
         } else if self.eat_symbol(kw::Break) {
+            // FIXME: Don't allow this outside loops
             let ident = self.eat_ident();
             self.eat(TokenKind::Semicolon);
 
@@ -701,6 +803,7 @@ impl<'a> Parser<'a> {
                 kind: StatementKind::Break(ident),
             }
         } else if self.eat_symbol(kw::Continue) {
+            // FIXME: Don't allow this outside loops
             let ident = self.eat_ident();
             self.eat(TokenKind::Semicolon);
             Statement {
@@ -727,16 +830,15 @@ impl<'a> Parser<'a> {
             let block = self.parse_block();
             self.expect(TokenKind::RBrace);
             let span = span.to(self.prev_token.span());
+            let func = Function {
+                name: Some(name),
+                params,
+                rest,
+                body: block,
+            };
+            check_function_early_errors(&func, span);
             Statement {
-                kind: StatementKind::FunctionDeclaration(self.alloc_node(
-                    Function {
-                        name: Some(name),
-                        params,
-                        rest,
-                        body: block,
-                    },
-                    span,
-                )),
+                kind: StatementKind::FunctionDeclaration(self.alloc_node(func, span)),
             }
         } else if let Some(decl) = self.parse_variable_declaration() {
             self.eat(TokenKind::Semicolon);
@@ -1278,17 +1380,18 @@ impl<'a> Parser<'a> {
         let body = self.parse_block();
         self.expect(TokenKind::RBrace);
         let span = start.to(self.prev_token.span());
+
+        let func = Function {
+            name,
+            params,
+            rest,
+            body,
+        };
+        check_function_early_errors(&func, span);
+
         self.alloc_node(
             Expression {
-                kind: ExpressionKind::Function(self.alloc_node(
-                    Function {
-                        name,
-                        params,
-                        rest,
-                        body,
-                    },
-                    span,
-                )),
+                kind: ExpressionKind::Function(self.alloc_node(func, span)),
             },
             span,
         )
@@ -1311,7 +1414,7 @@ impl<'a> Parser<'a> {
             if !self.eat(TokenKind::Arrow) {
                 return None;
             }
-            (vec![FunctionParam::Normal(arg)], None)
+            (ParamList(vec![FunctionParam::Normal(arg)]), None)
         } else if let TokenKind::LParen = self.prev_token.kind() {
             let lookahead = self.lookahead_delim(TokenKind::LParen, TokenKind::RParen);
             if lookahead.token.kind() != TokenKind::Arrow {
@@ -1340,26 +1443,27 @@ impl<'a> Parser<'a> {
             }
         };
 
+        let func = Function {
+            name: None,
+            params,
+            rest,
+            body,
+        };
+        check_function_early_errors(&func, span);
+
         let span = span.to(self.prev_token.span());
         Some(self.alloc_node(
             Expression {
-                kind: ExpressionKind::Arrow(self.alloc_node(
-                    Function {
-                        name: None,
-                        params,
-                        rest,
-                        body,
-                    },
-                    span,
-                )),
+                kind: ExpressionKind::Arrow(self.alloc_node(func, span)),
             },
             span,
         ))
     }
 
     /// Parses function params without parens. Also returns the `rest` param if there was one
-    fn parse_function_params(&mut self) -> (Vec<FunctionParam>, Option<Symbol>) {
-        let params = self.parse_delimited_list(TokenKind::Comma, Self::parse_function_param);
+    fn parse_function_params(&mut self) -> (ParamList, Option<Symbol>) {
+        let params =
+            ParamList(self.parse_delimited_list(TokenKind::Comma, Self::parse_function_param));
         let rest = self
             .eat(TokenKind::DotDotDot)
             .then(|| self.expect_ident_no_kw());
@@ -1429,6 +1533,26 @@ impl<'a> Parser<'a> {
             },
             span,
         )
+    }
+}
+
+/// Check for early errors in a function.
+/// 1. BoundNames(ParamList).Intersection(LexicallyDefinedNames(body)).len() > 0
+fn check_function_early_errors(
+    Function {
+        params, rest, body, ..
+    }: &Function,
+    span: Span,
+) {
+    // FIXME: move rest into params
+    let bound = params.bound_names().collect::<HashSet<_>>();
+    for name in body.lexically_declared_names() {
+        if bound.contains(&name) {
+            report_fatal_error(
+                format!("identifier `{name}` has already been defined as a parameter"),
+                span,
+            );
+        }
     }
 }
 
