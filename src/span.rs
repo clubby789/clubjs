@@ -44,10 +44,6 @@ impl Span {
     pub fn new(start: usize, len: usize) -> Self {
         Self { start, len }
     }
-
-    pub fn is_empty(self) -> bool {
-        self.len() == 0
-    }
 }
 
 impl Debug for Span {
