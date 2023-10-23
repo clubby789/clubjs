@@ -409,6 +409,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn expect_symbol(&mut self, sym: Symbol) {
+        if !self.eat_symbol(sym) {
+            report_fatal_error(format!("expected `{}`", sym.as_str()), self.token.span());
+        }
+    }
+
     fn peek_ident(&mut self) -> Option<Symbol> {
         matches!(self.token.kind(), TokenKind::Ident).then(|| self.intern(self.token))
     }
@@ -463,6 +469,7 @@ impl<'a> Parser<'a> {
         lookahead
     }
 
+    /// Attempts to parse a statement
     fn parse_statement(&mut self) -> Option<Node<Statement>> {
         if matches!(self.token.kind(), TokenKind::Eof | TokenKind::RBrace) {
             return None;
@@ -489,7 +496,7 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::RParen);
             let (content, scope) = parse_with_scope!(self:
                 self
-                    .parse_statement()
+                    .parse_statement_or_expr()
                     .unwrap_or_else(|| report_fatal_error("if statements must have a block", self.token.span()))
             );
             if let StatementKind::Labeled(_, inner) = &content.kind {
@@ -502,7 +509,7 @@ impl<'a> Parser<'a> {
             }
             let alternate = self
                 .eat_symbol(kw::Else)
-                .then(|| self.parse_statement())
+                .then(|| self.parse_statement_or_expr())
                 .flatten();
             Statement {
                 kind: StatementKind::If(expr, Box::new(content), alternate.map(Box::new), scope),
@@ -512,17 +519,25 @@ impl<'a> Parser<'a> {
             let expr = self.parse_expression();
             self.expect(TokenKind::RParen);
             let content = self
-                .parse_statement()
+                .parse_statement_or_expr()
                 .expect("while loops must have a body");
 
             Statement {
                 kind: StatementKind::While(expr, Box::new(content)),
             }
         } else if self.eat_symbol(kw::Do) {
-            let content = self
-                .parse_statement()
-                .expect("do/while statements must have a body");
-            assert!(self.eat_symbol(kw::While), "expected `while` after `do`");
+            let content = self.parse_statement().unwrap_or_else(|| {
+                report_fatal_error("do/while statements must have a body", self.token.span())
+            });
+            if let StatementKind::Labeled(_, inner) = &content.kind {
+                if matches!(inner.kind, StatementKind::FunctionDeclaration(..)) {
+                    report_fatal_error(
+                        "functions as the body of a do/while statement may not be labelled",
+                        inner.span(),
+                    )
+                }
+            }
+            self.expect_symbol(kw::While);
             self.expect(TokenKind::LParen);
             let expr = self.parse_expression();
             self.expect(TokenKind::RParen);
@@ -572,7 +587,7 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_expression();
                 self.expect(TokenKind::RParen);
                 let (content, body_scope) = parse_with_scope!(self:self
-                    .parse_statement()
+                    .parse_statement_or_expr()
                     .expect("for/of loops must have a body"));
                 StatementKind::ForOf {
                     target: get_target("for/of"),
@@ -585,7 +600,7 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_expression();
                 self.expect(TokenKind::RParen);
                 let (content, body_scope) = parse_with_scope!(self:self
-                    .parse_statement()
+                    .parse_statement_or_expr()
                     .expect("for/in loops must have a body"));
                 StatementKind::ForIn {
                     header_scope,
@@ -614,7 +629,7 @@ impl<'a> Parser<'a> {
                 };
                 self.expect(TokenKind::RParen);
                 let (content, body_scope) = parse_with_scope!(self:self
-                    .parse_statement()
+                    .parse_statement_or_expr()
                     .expect("for loops must have a body"));
                 StatementKind::For {
                     header_scope,
@@ -629,7 +644,7 @@ impl<'a> Parser<'a> {
             Statement { kind }
         } else if let Some(tokens) = self.eat_many(&[TokenKind::Ident, TokenKind::Colon]) {
             let stmt = self
-                .parse_statement()
+                .parse_statement_or_expr()
                 .expect("label must be followed by a statement");
             assert_eq!(tokens.len(), 2);
             let ident = Symbol::intern(tokens[1].source_string(self.src()));
@@ -721,7 +736,7 @@ impl<'a> Parser<'a> {
                         self.token.span().shrink_to_lo(),
                     )
                 } else {
-                    self.parse_statement().unwrap_or_else(|| {
+                    self.parse_statement_or_expr().unwrap_or_else(|| {
                         self.alloc_node(
                             Statement {
                                 kind: StatementKind::Empty,
@@ -764,7 +779,7 @@ impl<'a> Parser<'a> {
                                     .expect("there should always be one scope")
                                     .insert(sym, VariableKind::Var);
                             }
-                            std::iter::from_fn(|| self.parse_statement()).collect()
+                            std::iter::from_fn(|| self.parse_statement_or_expr()).collect()
                         }
                     };
                     Block { statements, scope }
@@ -787,19 +802,29 @@ impl<'a> Parser<'a> {
                 kind: StatementKind::Try(block, catch, finally),
             }
         } else {
-            let kind = self
-                .try_parse_expression()
-                .map_or(StatementKind::Empty, StatementKind::Expression);
-            self.eat(TokenKind::Semicolon);
-
-            Statement { kind }
+            return None;
         };
         Some(self.alloc_node(statement, span.to(self.prev_token.span().shrink_to_hi())))
     }
 
+    /// Attempts to parse a statement. Will fallback to parsing an expression and wrapping
+    /// it in a [`StatementKind::Expression`], or returning a [`StatementKind::Empty`] as
+    /// a last resort.
+    // FIXME: make this non-optional as it never returns none
+    fn parse_statement_or_expr(&mut self) -> Option<Node<Statement>> {
+        self.parse_statement().or_else(|| {
+            let span = self.token.span().shrink_to_lo();
+            let kind = self
+                .try_parse_expression()
+                .map_or(StatementKind::Empty, StatementKind::Expression);
+            self.eat(TokenKind::Semicolon);
+            Some(self.alloc_node(Statement { kind }, span.to(self.prev_token.span())))
+        })
+    }
+
     fn parse_block(&mut self) -> Block {
         let (statements, scope) = parse_with_scope! { self:
-            std::iter::from_fn(|| self.parse_statement()).collect()
+            std::iter::from_fn(|| self.parse_statement_or_expr()).collect()
         };
         Block { statements, scope }
     }
@@ -910,10 +935,6 @@ impl<'a> Parser<'a> {
                 kw::Case | kw::Default => r!(),
                 kw::Of => r!(),
                 kw::In => r!(_, Self::parse_binary, COMPARE),
-                #[cfg(debug_assertions)]
-                sym if kw::KEYWORD_NAMES.contains(&sym.as_str()) => {
-                    panic!("parsing keyword {sym:?} as identifier")
-                }
                 _ => r!(Self::parse_identifier, _),
             },
             TokenKind::Question => r!(_, Self::parse_ternary, TERNARY),
