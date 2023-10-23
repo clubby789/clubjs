@@ -467,7 +467,7 @@ impl<'a> Parser<'a> {
         if matches!(self.token.kind(), TokenKind::Eof | TokenKind::RBrace) {
             return None;
         }
-        let span = self.prev_token.span().shrink_to_hi();
+        let span = self.token.span().shrink_to_lo();
         let statement = if self.eat(TokenKind::Semicolon) {
             Statement {
                 kind: StatementKind::Empty,
