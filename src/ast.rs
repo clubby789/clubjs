@@ -964,13 +964,18 @@ impl<'a> Parser<'a> {
                 .try_parse_expression()
                 .map_or(StatementKind::Empty, StatementKind::Expression);
             self.eat(TokenKind::Semicolon);
-            Some(self.alloc_node(Statement { kind }, span.to(self.prev_token.span())))
+            let span = if matches!(kind, StatementKind::Empty) {
+                self.prev_token.span()
+            } else {
+                span.to(self.prev_token.span().shrink_to_hi())
+            };
+            Some(self.alloc_node(Statement { kind }, span))
         })
     }
 
     fn parse_block(&mut self) -> Block {
         let (statements, scope) = parse_with_scope! { self:
-            std::iter::from_fn(|| self.parse_statement_or_expr()).collect()
+            std::iter::from_fn(|| self.parse_statement_or_expr()).take_while(|stmt| !matches!(stmt.kind, StatementKind::Empty)).collect()
         };
         Block { statements, scope }
     }
