@@ -1,7 +1,8 @@
 use std::{
     cell::Cell,
     collections::{hash_map::Entry, HashMap},
-    path::PathBuf, fmt::Debug,
+    fmt::Debug,
+    path::PathBuf,
 };
 
 use crate::{
@@ -793,7 +794,7 @@ impl<'a> Parser<'a> {
     #[track_caller]
     fn parse_expression_precedence(&mut self, prec: Precedence) -> Node<Expression> {
         self.try_parse_expression_precedence(prec)
-            .expect("expected expression")
+            .unwrap_or_else(|| report_fatal_error("expected expression", self.token.span()))
     }
 
     fn try_parse_expression_precedence(&mut self, prec: Precedence) -> Option<Node<Expression>> {
