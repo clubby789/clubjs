@@ -1,6 +1,6 @@
 use std::str::Chars;
 
-use crate::{intern::Symbol, span::Span};
+use crate::{intern::Symbol, session::report_fatal_error, span::Span};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum TokenKind {
@@ -232,15 +232,7 @@ impl<'a> Lexer<'a> {
                 match self.chars.next() {
                     Some('*') if self.try_eat('/') => break,
                     None => {
-                        eprintln!(
-                            "expected a `*/`:\n{}",
-                            crate::SESSION
-                                .get()
-                                .unwrap()
-                                .sourcemap()
-                                .render_source_span(Span::new(start, self.position() - start))
-                        );
-                        std::process::exit(1);
+                        report_fatal_error("expected a `*/`", Span::new(start, self.position() - start));
                     }
                     _ => (),
                 }
@@ -336,16 +328,10 @@ impl<'a> Lexer<'a> {
             }
 
             p => {
-                eprintln!(
-                    "could not parse `{}`:\n{}",
-                    p.escape_unicode(),
-                    crate::SESSION
-                        .get()
-                        .unwrap()
-                        .sourcemap()
-                        .render_source_span(Span::new(start, self.position() - start))
+                report_fatal_error(
+                    format!("could not parse `{}`", p.escape_unicode()),
+                    Span::new(start, self.position() - start),
                 );
-                std::process::exit(1);
             }
         };
         Token {

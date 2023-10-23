@@ -1,4 +1,7 @@
-use std::fmt::{Debug, Write};
+use std::{
+    fmt::{Debug, Write},
+    path::{Path, PathBuf},
+};
 
 #[derive(Copy, Clone, PartialEq, Eq, Default)]
 pub struct Span {
@@ -53,7 +56,8 @@ impl Debug for Span {
             let sm = sess.sourcemap();
             write!(
                 f,
-                "({}:{} - {}:{})",
+                "{}[{}:{} - {}:{})]",
+                sm.path.display(),
                 sm.lookup_line(self.lo()),
                 sm.lookup_col(self.lo()),
                 sm.lookup_line(self.hi()),
@@ -73,10 +77,11 @@ pub struct SourceMap {
     /// Byte positions of newlines in source file, in order
     lines: Vec<usize>,
     source: String,
+    path: PathBuf,
 }
 
 impl SourceMap {
-    pub fn from_src(source: String) -> Self {
+    pub fn from_src(source: String, path: PathBuf) -> Self {
         Self {
             lines: source
                 .bytes()
@@ -84,7 +89,12 @@ impl SourceMap {
                 .filter_map(|(i, c)| (c == b'\n').then_some(i))
                 .collect(),
             source,
+            path,
         }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// Get the line number of a given byte position in the source, starting at 1
@@ -131,7 +141,9 @@ impl SourceMap {
 
     /// Returns the lines of source containing the selected span,
     /// with the span itself highlighted
-    pub fn render_source_span(&self, sp: Span) -> String {
+    /// Pads with `pad` empty lines above and below
+    pub fn render_source_span(&self, sp: Span, pad: usize) -> String {
+        let pad = "\n".repeat(pad);
         let start_line = self.lookup_line(sp.lo());
         let end_line = self.lookup_line(sp.hi());
 
@@ -142,10 +154,14 @@ impl SourceMap {
                 .checked_sub(1)
                 .expect("columns start at 1");
             if sp.is_empty() {
-                return format!("{content}\n{}^", " ".repeat(start));
+                return format!("{pad}{content}\n{}^{pad}", " ".repeat(start));
             }
             let len = self.source[sp.lo()..sp.hi()].chars().count();
-            return format!("{content}\n{}{}", " ".repeat(start), "~".repeat(len));
+            return format!(
+                "{pad}{content}\n{}{}{pad}",
+                " ".repeat(start),
+                "~".repeat(len)
+            );
         }
         let mut rendered = String::new();
         for line in start_line..=end_line {
@@ -172,7 +188,7 @@ impl SourceMap {
                 write!(rendered, "\n{}", "~".repeat(content.chars().count())).unwrap();
             }
         }
-        rendered
+        format!("{pad}{rendered}{pad}")
     }
 }
 

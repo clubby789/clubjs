@@ -1,12 +1,13 @@
 use std::{
     cell::Cell,
     collections::{hash_map::Entry, HashMap},
+    path::PathBuf,
 };
 
 use crate::{
     intern::Symbol,
     lex::{kw, Lexer, Token, TokenKind},
-    session::Session,
+    session::{report_fatal_error, Session},
     span::{Node, SourceMap, Span},
 };
 
@@ -281,11 +282,9 @@ impl Scope {
     /// Will throw an error if redeclaring a variable that is not allowed.
     pub fn add_declaration(&mut self, decl: &VariableDeclaration) {
         for v in &decl.declarations {
-            assert!(
-                self.insert(v.name, decl.kind),
-                "redeclaration of {}",
-                v.name.as_str()
-            );
+            if !self.insert(v.name, decl.kind) {
+                report_fatal_error(format!("redeclaration of {}", v.name.as_str()), v.span());
+            }
         }
     }
 }
@@ -303,10 +302,10 @@ macro_rules! parse_with_scope {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(source: &'a str) -> Self {
+    pub fn new(source: &'a str, path: PathBuf) -> Self {
         let mut lexer = Lexer::new(source);
         crate::SESSION
-            .set(Session::new(SourceMap::from_src(source.to_string())))
+            .set(Session::new(SourceMap::from_src(source.to_string(), path)))
             .unwrap();
         let token = lexer.next_token();
         Self {
@@ -370,17 +369,10 @@ impl<'a> Parser<'a> {
     #[track_caller]
     fn expect(&mut self, kind: TokenKind) {
         if !self.eat(kind) {
-            eprintln!(
-                "expected `{:?}` but found `{:?}`:\n{}",
-                kind,
-                self.token.kind(),
-                crate::SESSION
-                    .get()
-                    .unwrap()
-                    .sourcemap()
-                    .render_source_span(dbg!(self.token.span()))
+            report_fatal_error(
+                format!("expected `{:?}` but found `{:?}`", kind, self.token.kind()),
+                self.token.span(),
             );
-            std::process::exit(1);
         }
     }
 
