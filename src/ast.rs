@@ -1130,6 +1130,7 @@ impl<'a> Parser<'a> {
             TokenKind::LBracket => {
                 let rule = self.get_rule(self.prev_token);
                 let right = self.parse_expression_precedence(rule.precedence.next());
+                self.expect(TokenKind::RBracket);
                 MemberKey::Computed(Box::new(right))
             }
             _ => unreachable!(),
