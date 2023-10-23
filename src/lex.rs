@@ -96,8 +96,9 @@ pub mod kw {
     pub const Of: Symbol = Symbol(23);
     pub const In: Symbol = Symbol(24);
     pub const InstanceOf: Symbol = Symbol(25);
+    pub const Delete: Symbol = Symbol(26);
 
-    pub static KEYWORD_NAMES: [&str; 26] = [
+    pub static KEYWORD_NAMES: [&str; 27] = [
         "function",
         "return",
         "if",
@@ -124,6 +125,7 @@ pub mod kw {
         "of",
         "in",
         "instanceof",
+        "delete",
     ];
 }
 

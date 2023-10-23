@@ -149,6 +149,7 @@ pub enum ExpressionKind {
         alternate: Box<Node<Expression>>,
     },
     New(Box<Node<Expression>>),
+    Delete(Box<Node<Expression>>),
     Call(Box<Node<Expression>>, Vec<Node<Expression>>),
     Member(Box<Node<Expression>>, MemberKey),
     // TODO: Support yield and generators
@@ -883,6 +884,7 @@ impl<'a> Parser<'a> {
                 kw::TypeOf => r!(Self::parse_unary, _, UNARY),
                 kw::This => r!(Self::parse_this, _),
                 kw::New => r!(Self::parse_new, _, NEW),
+                kw::Delete => r!(Self::parse_delete, _, DELETE),
                 kw::Function => r!(Self::parse_function_expression, _),
                 kw::Case | kw::Default => r!(),
                 kw::Of => r!(),
@@ -1168,6 +1170,18 @@ impl<'a> Parser<'a> {
         )
     }
 
+    fn parse_delete(&mut self) -> Node<Expression> {
+        let start = self.prev_token.span();
+        let target = self.parse_expression_precedence(Precedence::DELETE.next());
+
+        self.alloc_node(
+            Expression {
+                kind: ExpressionKind::Delete(Box::new(target)),
+            },
+            start.to(self.prev_token.span()),
+        )
+    }
+
     fn parse_function_expression(&mut self) -> Node<Expression> {
         let start = self.prev_token.span();
         let name = self.eat_ident();
@@ -1347,6 +1361,7 @@ impl Precedence {
     const POSTFIX: Self = Self(15);
     const MEMBER: Self = Self(17);
     const NEW: Self = Self(17);
+    const DELETE: Self = Self(17);
     const CALL: Self = Self(17);
     const GROUPING: Self = Self(18);
 }
