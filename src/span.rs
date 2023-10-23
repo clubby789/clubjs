@@ -153,7 +153,7 @@ impl SourceMap {
                 .lookup_col(sp.lo())
                 .checked_sub(1)
                 .expect("columns start at 1");
-            if sp.is_empty() {
+            if sp.len() < 2 {
                 return format!("{pad}{content}\n{}^{pad}", " ".repeat(start));
             }
             let len = self.source[sp.lo()..sp.hi()].chars().count();
