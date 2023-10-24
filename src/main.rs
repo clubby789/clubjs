@@ -1,9 +1,11 @@
 mod ast;
 mod codegen;
 mod intern;
+mod interpreter;
 mod lex;
 mod session;
 mod span;
+mod util;
 
 use std::path::PathBuf;
 
