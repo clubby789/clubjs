@@ -12,7 +12,7 @@ use super::{JSObject, JSValue, PropertyDescriptor, Shared};
 pub(super) struct Realm {
     intrinsics: RealmIntrinsics,
     global_object: Shared<JSObject>,
-    global_env: GlobalEnvironmentRecord,
+    pub global_env: Shared<GlobalEnvironmentRecord>,
     agent: Weak<RefCell<Agent>>,
 }
 
@@ -29,7 +29,7 @@ impl Realm {
         Self {
             intrinsics: RealmIntrinsics,
             global_object: Shared::new(JSObject::default()),
-            global_env: GlobalEnvironmentRecord::default(),
+            global_env: Shared::new(GlobalEnvironmentRecord::default()),
             agent: Weak::new(),
         }
     }
@@ -50,7 +50,9 @@ impl Realm {
         let global_obj = global_obj.unwrap_or_else(|| todo!("OrdinaryObjectCreate"));
         let this_value = this_value.unwrap_or_else(|| global_obj.clone());
         self.global_object = global_obj.clone();
-        self.global_env = GlobalEnvironmentRecord::new_global_environment(global_obj, this_value)
+        self.global_env = Shared::new(GlobalEnvironmentRecord::new_global_environment(
+            global_obj, this_value,
+        ))
     }
 
     pub fn set_default_global_bindings(&mut self) {
@@ -59,7 +61,7 @@ impl Realm {
         for (name, prop) in [
             (
                 kw::globalThis,
-                PropertyDescriptor::new(self.global_env.global_this().clone().into())
+                PropertyDescriptor::new(self.global_env.borrow().global_this().clone().into())
                     .writable(true),
             ),
             // TODO: floats

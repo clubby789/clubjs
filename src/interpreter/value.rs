@@ -176,8 +176,12 @@ impl BuiltinFunctionSlots {
         this: Option<JSValue>,
         args: Vec<JSValue>,
     ) -> JSValue {
-        let callee_context =
-            ExecutionContext::from_realm_and_function(self.realm.clone(), function_obj);
+        let callee_context = ExecutionContext::from_realm_and_function(
+            self.realm.clone(),
+            function_obj,
+            todo!(),
+            todo!(),
+        );
         self.realm.borrow().push_execution_context(callee_context);
         let result = (self.func)(self.realm.clone(), this, args);
         self.realm.borrow().pop_execution_context();

@@ -1,3 +1,4 @@
+/*
 pub struct NonEmptyStack<T> {
     inner: Vec<T>,
 }
@@ -45,3 +46,4 @@ impl<T> NonEmptyStack<T> {
         unsafe { self.inner.last_mut().unwrap_unchecked() }
     }
 }
+*/

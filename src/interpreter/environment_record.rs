@@ -75,11 +75,11 @@ impl DeclarativeEnvironmentRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum EnvironmentRecord {
-    Declarative(DeclarativeEnvironmentRecord),
-    Object(ObjectEnvironmentRecord),
-    Global(GlobalEnvironmentRecord),
+    Declarative(Shared<DeclarativeEnvironmentRecord>),
+    Object(Shared<ObjectEnvironmentRecord>),
+    Global(Shared<GlobalEnvironmentRecord>),
 }
 
 #[derive(Default, Debug)]

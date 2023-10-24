@@ -9,6 +9,7 @@ mod util;
 
 use std::path::PathBuf;
 
+use interpreter::Agent;
 use session::SESSION;
 
 fn main() {
@@ -16,7 +17,7 @@ fn main() {
         .nth(1)
         .map_or_else(|| PathBuf::from("src.js"), |a| a.try_into().unwrap());
     let src = std::fs::read_to_string(&path).unwrap();
-    let p = ast::Parser::new(&src, path);
-    // println!("{:#?}", p.parse());
-    dbg!(codegen::FunctionBuilder::codegen(p.parse()));
+    let agent = Agent::new();
+    let script = agent.borrow().parse_script(&src, path);
+    agent.borrow_mut().script_evaluation(script);
 }
