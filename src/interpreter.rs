@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use crate::{intern::Symbol, util::NonEmptyStack};
+use crate::{intern::Symbol, lex::kw, util::NonEmptyStack};
 use std::{
     cell::{Ref, RefCell, RefMut},
     collections::{hash_map::Entry, HashMap},
@@ -12,6 +12,33 @@ struct Realm {
     intrinsics: RealmIntrinsics,
     global_object: Shared<JSObject>,
     global_env: GlobalEnvironmentRecord,
+}
+
+macro_rules! make_prop {
+    () => {
+        PropertyDescriptor {
+            value: JSValue::undefined(),
+            writable: true,
+            enumerable: true,
+            configurable: true,
+        }
+    };
+    ($value:expr) => {
+        PropertyDescriptor {
+            value: $value,
+            writable: false,
+            enumerable: false,
+            configurable: false,
+        }
+    };
+    ($value:expr, w) => {
+        PropertyDescriptor {
+            value: $value,
+            writable: true,
+            enumerable: false,
+            configurable: false,
+        }
+    };
 }
 
 impl Realm {
@@ -35,49 +62,30 @@ impl Realm {
     }
 
     pub fn set_default_global_bindings(&mut self) {
+        // TODO: add functions constructors and other props
         let global = self.global_object.clone();
         for (name, prop) in [
             (
-                Symbol::intern("globalThis"),
-                PropertyDescriptor {
-                    value: self.global_env.global_this.clone().into(),
-                    writable: true,
-                    enumerable: false,
-                    configurable: true,
-                },
+                kw::globalThis,
+                make_prop!(self.global_env.global_this.clone().into(), w),
             ),
-            (
-                Symbol::intern("Infinity"),
-                PropertyDescriptor {
-                    value: todo!(),
-                    writable: false,
-                    enumerable: false,
-                    configurable: false,
-                },
-            ),
-            (
-                Symbol::intern("NaN"),
-                PropertyDescriptor {
-                    value: todo!(),
-                    writable: false,
-                    enumerable: false,
-                    configurable: false,
-                },
-            ),
-            (
-                Symbol::intern("undefined"),
-                PropertyDescriptor {
-                    value: JSValue::undefined(),
-                    writable: false,
-                    enumerable: false,
-                    configurable: true,
-                },
-            ),
+            // TODO: floats
+            (kw::Infinity, make_prop!(JSValue::undefined())),
+            (kw::NaN, make_prop!(JSValue::undefined())),
+            (kw::undefined, make_prop!(JSValue::undefined())),
         ] {
             self.global_object
                 .borrow_mut()
                 .define_property_or_throw(name, prop);
         }
+    }
+
+    pub fn set_custom_global_bindings(&mut self) {
+        let name = kw::console_log;
+        let prop = make_prop!();
+        self.global_object
+            .borrow_mut()
+            .define_property_or_throw(name, prop)
     }
 }
 
