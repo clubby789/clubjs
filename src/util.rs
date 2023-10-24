@@ -31,10 +31,6 @@ impl<T> NonEmptyStack<T> {
         self.try_pop().expect("pop would make stack empty")
     }
 
-    pub unsafe fn pop_unchecked(&mut self) -> T {
-        unsafe { self.try_pop().unwrap_unchecked() }
-    }
-
     pub fn last(&self) -> &T {
         debug_assert!(self.size() >= 1);
         // SAFETY: Constructor creates with one value, and `try_pop`

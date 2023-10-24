@@ -106,6 +106,7 @@ pub mod kw {
         NaN,
         undefined,
         console_log,
+        default,
     }
 }
 
