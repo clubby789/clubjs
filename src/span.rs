@@ -240,6 +240,10 @@ impl<T> Node<T> {
             item: f(self.item),
         }
     }
+
+    pub fn take(self) -> T {
+        self.item
+    }
 }
 
 impl<T> std::ops::Deref for Node<T> {

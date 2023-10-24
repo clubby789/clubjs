@@ -187,8 +187,24 @@ pub enum StatementKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
-    statements: Vec<Node<Statement>>,
-    scope: Scope,
+    pub statements: Vec<Node<Statement>>,
+    pub scope: Scope,
+}
+
+impl Block {
+    pub fn len(&self) -> usize {
+        self.statements.len()
+    }
+}
+
+impl IntoIterator for Block {
+    type Item = Node<Statement>;
+
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.statements.into_iter()
+    }
 }
 
 impl Names for Block {

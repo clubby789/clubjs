@@ -1,4 +1,5 @@
 mod ast;
+mod codegen;
 mod intern;
 mod lex;
 mod session;
@@ -15,5 +16,5 @@ fn main() {
     let src = std::fs::read_to_string(&path).unwrap();
     let p = ast::Parser::new(&src, path);
     // println!("{:#?}", p.parse());
-    dbg!(p.parse());
+    dbg!(codegen::FunctionBuilder::codegen(p.parse()));
 }
