@@ -35,6 +35,10 @@ impl Symbol {
     pub fn intern(s: &str) -> Symbol {
         INTERNER.lock().unwrap().intern(s)
     }
+
+    pub fn is_keyword(self) -> bool {
+        self.0 < crate::lex::kw::N_KEYWORDS
+    }
 }
 
 impl Debug for Symbol {
@@ -59,7 +63,7 @@ pub struct Interner<'a> {
 impl<'a> Interner<'a> {
     pub fn new() -> Self {
         let mut s = Self::default();
-        for kw in crate::lex::kw::KEYWORD_NAMES {
+        for kw in crate::lex::kw::SYMBOL_VALUES {
             s.intern(kw);
         }
         s

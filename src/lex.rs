@@ -70,63 +70,38 @@ pub enum Literal {
 #[allow(non_upper_case_globals)]
 pub mod kw {
     use crate::intern::Symbol;
-    pub const Function: Symbol = Symbol(0);
-    pub const Return: Symbol = Symbol(1);
-    pub const If: Symbol = Symbol(2);
-    pub const Else: Symbol = Symbol(3);
-    pub const While: Symbol = Symbol(4);
-    pub const For: Symbol = Symbol(5);
-    pub const Break: Symbol = Symbol(6);
-    pub const Continue: Symbol = Symbol(7);
-    pub const Var: Symbol = Symbol(8);
-    pub const Let: Symbol = Symbol(9);
-    pub const Const: Symbol = Symbol(10);
-    pub const Debugger: Symbol = Symbol(11);
-    pub const This: Symbol = Symbol(12);
-    pub const TypeOf: Symbol = Symbol(13);
-    pub const New: Symbol = Symbol(14);
-    pub const Switch: Symbol = Symbol(15);
-    pub const Case: Symbol = Symbol(16);
-    pub const Default: Symbol = Symbol(17);
-    pub const Throw: Symbol = Symbol(18);
-    pub const Try: Symbol = Symbol(19);
-    pub const Catch: Symbol = Symbol(20);
-    pub const Finally: Symbol = Symbol(21);
-    pub const Do: Symbol = Symbol(22);
-    pub const Of: Symbol = Symbol(23);
-    pub const In: Symbol = Symbol(24);
-    pub const InstanceOf: Symbol = Symbol(25);
-    pub const Delete: Symbol = Symbol(26);
 
-    pub static KEYWORD_NAMES: [&str; 27] = [
-        "function",
-        "return",
-        "if",
-        "else",
-        "while",
-        "for",
-        "break",
-        "continue",
-        "var",
-        "let",
-        "const",
-        "debugger",
-        "this",
-        "typeof",
-        "new",
-        "switch",
-        "case",
-        "default",
-        "throw",
-        "try",
-        "catch",
-        "finally",
-        "do",
-        "of",
-        "in",
-        "instanceof",
-        "delete",
-    ];
+    clubjs_macros::preintern! {
+        keywords {
+            Function: "function",
+            Return: "return",
+            If: "if",
+            Else: "else",
+            While: "while",
+            For: "for",
+            Break: "break",
+            Continue: "continue",
+            Var: "var",
+            Let: "let",
+            Const: "const",
+            Debugger: "debugger",
+            This: "this",
+            TypeOf: "typeof",
+            New: "new",
+            Switch: "switch",
+            Case: "case",
+            Default: "default",
+            Throw: "throw",
+            Try: "try",
+            Catch: "catch",
+            Finally: "finally",
+            Do: "do",
+            Of: "of",
+            In: "in",
+            InstanceOf: "instanceof",
+            Delete: "delete",
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

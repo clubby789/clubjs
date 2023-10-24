@@ -558,7 +558,7 @@ impl<'a> Parser<'a> {
     #[track_caller]
     fn expect_ident_no_kw(&mut self) -> Symbol {
         let sym = self.expect_ident();
-        if kw::KEYWORD_NAMES.contains(&sym.as_str()) {
+        if sym.is_keyword() {
             report_fatal_error(
                 "expected an identifier, found keyword",
                 self.prev_token.span(),
@@ -1495,7 +1495,7 @@ impl<'a> Parser<'a> {
 
     fn parse_function_param(&mut self) -> Option<FunctionParam> {
         let ident = self.eat_ident()?;
-        if kw::KEYWORD_NAMES.contains(&ident.as_str()) {
+        if ident.is_keyword() {
             report_fatal_error(
                 "expected an identifier, found keyword",
                 self.prev_token.span(),
