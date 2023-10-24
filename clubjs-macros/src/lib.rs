@@ -6,7 +6,7 @@ use syn::{
     parse::{Parse, ParseStream},
     parse_macro_input,
     punctuated::Punctuated,
-    token, LitStr, Token,
+    LitStr, Token,
 };
 
 struct PreIntern {
@@ -27,17 +27,7 @@ impl Parse for PreIntern {
         } else {
             Default::default()
         };
-        let mut symbols = Punctuated::new();
-        loop {
-            if input.is_empty() {
-                break;
-            }
-            symbols.push_value(input.parse()?);
-            if input.peek(token::Brace) {
-                break;
-            }
-            symbols.push_punct(input.parse()?);
-        }
+        let symbols = input.parse_terminated(Symbol::parse, Token![,])?;
         Ok(Self { symbols, keywords })
     }
 }
