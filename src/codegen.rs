@@ -1,6 +1,9 @@
 #![allow(unused)]
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 use indexmap::{set::Slice, IndexSet};
 use smallvec::SmallVec;
@@ -83,7 +86,7 @@ pub type StringIndex = usize;
 pub struct Script {
     code: Vec<Opcode<TemporaryIndex>>,
     variable_declarations: HashMap<Symbol, VariableKind>,
-    functions: HashMap<Symbol, Function>,
+    functions: HashMap<Symbol, Rc<Function>>,
     names: IndexSet<Symbol>,
     strings: IndexSet<Symbol>,
 }
@@ -93,12 +96,14 @@ impl Script {
         self.code.as_ref()
     }
 
-    pub fn names(&self) -> &Slice<Symbol> {
-        self.names.as_slice()
+    // TODO: make this a ref
+    pub fn names(&self) -> IndexSet<Symbol> {
+        self.names.clone()
     }
 
-    pub fn strings(&self) -> &Slice<Symbol> {
-        self.strings.as_slice()
+    // TODO: make this a ref
+    pub fn strings(&self) -> IndexSet<Symbol> {
+        self.strings.clone()
     }
 }
 
@@ -110,7 +115,7 @@ impl ScopeAnalysis for Script {
             .chain(
                 self.functions
                     .iter()
-                    .map(|(n, k)| (*n, Declaration::Function(k), VariableKind::Var)),
+                    .map(|(n, k)| (*n, Declaration::Function(k.clone()), VariableKind::Var)),
             )
     }
 }
@@ -119,9 +124,32 @@ impl ScopeAnalysis for Script {
 pub struct Function {
     code: Vec<Opcode<TemporaryIndex>>,
     variable_declarations: HashMap<Symbol, VariableKind>,
-    functions: HashMap<Symbol, Function>,
+    functions: HashMap<Symbol, Rc<Function>>,
     names: IndexSet<Symbol>,
     name: Symbol,
+
+    strings: IndexSet<Symbol>,
+    // TODO: make sure this interacts properly with names/bound names!!!!
+    param_list: Vec<ast::FunctionParam>,
+}
+
+impl Function {
+    pub fn params(&self) -> impl Iterator<Item = &ast::FunctionParam> {
+        self.param_list.iter()
+    }
+
+    // TODO: make this a ref
+    pub fn names(&self) -> IndexSet<Symbol> {
+        self.names.clone()
+    }
+
+    pub fn opcodes(&self) -> &[Opcode<usize>] {
+        self.code.as_ref()
+    }
+
+    pub fn strings(&self) -> IndexSet<Symbol> {
+        self.strings.clone()
+    }
 }
 
 impl ScopeAnalysis for Function {
@@ -132,7 +160,7 @@ impl ScopeAnalysis for Function {
             .chain(
                 self.functions
                     .iter()
-                    .map(|(n, k)| (*n, Declaration::Function(k), VariableKind::Let)),
+                    .map(|(n, k)| (*n, Declaration::Function(k.clone()), VariableKind::Let)),
             )
     }
 }
@@ -162,16 +190,16 @@ pub trait ScopeAnalysis {
 }
 
 #[derive(Debug)]
-pub enum Declaration<'a> {
+pub enum Declaration {
     Variable,
-    Function(&'a Function),
+    Function(Rc<Function>),
 }
 
 // FIXME: refactor this into a generic 'codegen context'
 #[derive(Default)]
 pub struct FunctionBuilder {
     code: Vec<Opcode<TemporaryIndex>>,
-    functions: HashMap<Symbol, Function>,
+    functions: HashMap<Symbol, Rc<Function>>,
     /// Holds the next temporary index to use,
     /// incrementing every time we allocate a new one
     tmp_idx: TemporaryIndex,
@@ -205,8 +233,12 @@ impl FunctionBuilder {
             ..Default::default()
         };
         let name = func.name.unwrap_or(kw::default);
-
-        let Block { statements, scope } = func.take().body;
+        // TODO: handle rest
+        let ast::Function {
+            params,
+            body: Block { statements, scope },
+            ..
+        } = func.take();
         for stmt in statements {
             f.codegen_statement(stmt)
         }
@@ -215,6 +247,8 @@ impl FunctionBuilder {
             functions: f.functions,
             names: f.names,
             variable_declarations: f.bound_names,
+            param_list: params.into_inner(),
+            strings: f.strings,
             name,
         }
     }
@@ -270,7 +304,11 @@ impl FunctionBuilder {
                 body_scope,
             } => todo!(),
             StatementKind::VariableDeclaration(_) => todo!(),
-            StatementKind::FunctionDeclaration(_) => todo!(),
+            StatementKind::FunctionDeclaration(f) => {
+                let f = Self::codegen_function(f);
+                // TODO: handle functions at non top level as lexical declarations
+                self.functions.insert(f.name, Rc::new(f));
+            }
         }
     }
 

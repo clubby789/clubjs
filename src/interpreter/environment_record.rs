@@ -44,6 +44,26 @@ impl GlobalEnvironmentRecord {
         self.var_names.insert(name);
     }
 
+    pub fn create_global_function_binding(
+        &mut self,
+        name: Symbol,
+        value: JSValue,
+        deletable: bool,
+    ) {
+        let obj_rec = &self.object_record;
+        let global_obj = &obj_rec.binding_object;
+        let existing = global_obj.borrow().get_own_property(name);
+        let desc = match existing {
+            Some(p) if !p.is_configurable() => PropertyDescriptor::new(value)
+                .writable(true)
+                .enumerable(true)
+                .configurable(deletable),
+            _ => PropertyDescriptor::new(value),
+        };
+        global_obj.borrow_mut().define_property_or_throw(name, desc);
+        self.var_names.insert(name);
+    }
+
     pub fn create_mutable_binding(&mut self, name: Symbol, deletable: bool) {
         if self.declarative_record.has_binding(name) {
             panic!("TypeError: binding `{name}` exists");
@@ -164,7 +184,15 @@ impl EnvironmentRecord {
         match self {
             EnvironmentRecord::Declarative(d) => d.borrow().outer_env.clone(),
             EnvironmentRecord::Object(o) => o.borrow().outer_env.clone(),
-            EnvironmentRecord::Global(_g) => None,
+            EnvironmentRecord::Global(_) => None,
+        }
+    }
+
+    pub fn set_outer_env(&self, env: Option<EnvironmentRecord>) {
+        match self {
+            EnvironmentRecord::Declarative(d) => d.borrow_mut().outer_env = env,
+            EnvironmentRecord::Object(o) => o.borrow_mut().outer_env = env,
+            EnvironmentRecord::Global(_) => panic!("can't set outer env of a global"),
         }
     }
 
@@ -182,6 +210,14 @@ impl EnvironmentRecord {
             EnvironmentRecord::Object(o) => o.borrow().get_binding_value(name),
             EnvironmentRecord::Global(g) => g.borrow().get_binding_value(name),
         }
+    }
+
+    pub fn new_function_environment(f: Shared<JSObject>) -> Self {
+        // TODO: Add FunctionEnvironmentRecord
+        let outer_env = f.borrow().environment_record();
+        EnvironmentRecord::Declarative(Shared::new(DeclarativeEnvironmentRecord::new(Some(
+            outer_env,
+        ))))
     }
 }
 

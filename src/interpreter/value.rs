@@ -5,9 +5,12 @@ use std::{
 };
 
 use either::Either;
-use indexmap::IndexSet;
 
-use crate::{ast, codegen::Script, intern::Symbol, lex::kw};
+use crate::{
+    codegen::{Function, Script},
+    intern::Symbol,
+    lex::kw,
+};
 
 use super::{EnvironmentRecord, ExecutionContext, Realm, ReferenceRecord, Shared};
 
@@ -279,17 +282,19 @@ impl JSObject {
         }
     }
 
-    /// Implements InstantiateOrdinaryFunctionObject
     pub fn ordinary_function_object(
-        function: ast::Function,
-        _env: EnvironmentRecord,
-        // _private_env: PrivateEnvironmentRecord,
+        prototype: Option<Shared<JSObject>>,
+        param_list: Vec<Symbol>,
+        body: Rc<Function>,
+        // TODO: check this is handled right (OrdinaryFunctionCreate)
+        this_mode: ThisMode,
+        env: EnvironmentRecord,
+        realm: Shared<Realm>,
     ) -> Self {
-        // 1. Let name be StringValue of BindingIdentifier.
-        let _name = function.name.unwrap_or(kw::default);
-        // OrdinaryFunctionCreate
-
-        todo!()
+        let mut f = Self::ordinary_object(prototype);
+        let slots = FunctionSlots::new(env, param_list, body, realm, this_mode);
+        f.extra_slots = AdditionalSlots::Function(slots);
+        f
     }
 
     /// Implements CreateBuiltinFunction
@@ -318,17 +323,31 @@ impl JSObject {
             AdditionalSlots::BuiltinFunction(_) | AdditionalSlots::Function(_)
         )
     }
+
+    pub fn extra_slots(&self) -> &AdditionalSlots {
+        &self.extra_slots
+    }
+
+    pub fn environment_record(&self) -> EnvironmentRecord {
+        let AdditionalSlots::Function(f) = &self.extra_slots else {
+            todo!("blah blah")
+        };
+        f.environment.clone()
+    }
 }
 
 impl Shared<JSObject> {
-    pub fn call(&self, script: Rc<Script>, this: JSValue, args: Vec<JSValue>) -> JSValue {
+    pub fn call(&self, script: Rc<Script>, this: JSValue, args: Vec<JSValue>) {
         let borrowed = self.borrow();
         match borrowed.extra_slots.clone() {
             AdditionalSlots::BuiltinFunction(b) => {
                 drop(borrowed);
-                b.call(script, JSValue::object(self.clone()), this, args)
+                // TODO: return this again
+                b.call(script, JSValue::object(self.clone()), this, args);
             }
-            AdditionalSlots::Function(_) => todo!(),
+            AdditionalSlots::Function(f) => {
+                f.call(script, JSValue::object(self.clone()), this, args);
+            }
             _ => unreachable!("callers should check this is callable"),
         }
     }
@@ -336,7 +355,7 @@ impl Shared<JSObject> {
 
 /// Hold additional slots for an ordinary object
 #[derive(Default, Debug, Clone)]
-enum AdditionalSlots {
+pub enum AdditionalSlots {
     #[default]
     None,
     BuiltinFunction(BuiltinFunctionSlots),
@@ -346,7 +365,7 @@ enum AdditionalSlots {
 pub type BuiltinFunctionPointer = fn(Shared<Realm>, JSValue, Vec<JSValue>) -> JSValue;
 
 #[derive(Debug, Clone)]
-struct BuiltinFunctionSlots {
+pub struct BuiltinFunctionSlots {
     realm: Shared<Realm>,
     initial_name: Symbol,
     func: BuiltinFunctionPointer,
@@ -384,21 +403,69 @@ impl BuiltinFunctionSlots {
 }
 
 #[derive(Debug, Clone)]
-struct FunctionSlots {
+pub struct FunctionSlots {
     environment: EnvironmentRecord,
     // private_environment: Option<Shared<PrivateEnvironmentRecord>>,
-    formal_paramaters: Vec<ast::FunctionParam>,
-    ecma_script_code: ast::Block,
+    formal_paramaters: Vec<Symbol>,
+    ecma_script_code: Rc<Function>,
     realm: Shared<Realm>,
     this_mode: ThisMode,
     // strict: bool,
-    home_object: Shared<JSObject>,
+    home_object: Option<Shared<JSObject>>,
+}
 
-    strings: IndexSet<Symbol>,
+impl FunctionSlots {
+    pub fn new(
+        env: EnvironmentRecord,
+        formal_paramaters: Vec<Symbol>,
+        ecma_script_code: Rc<Function>,
+        realm: Shared<Realm>,
+        this_mode: ThisMode,
+    ) -> Self {
+        Self {
+            environment: env,
+            formal_paramaters,
+            ecma_script_code,
+            realm,
+            this_mode,
+            home_object: None,
+        }
+    }
+
+    pub fn call(
+        &self,
+        script: Rc<Script>,
+        function_obj: JSValue,
+        _this: JSValue,
+        args: Vec<JSValue>,
+    ) {
+        // TODO: properly set up environment records
+        let realm = self.realm.clone();
+        let local_env =
+            EnvironmentRecord::new_function_environment(function_obj.to_object().unwrap().clone());
+
+        let callee_context = ExecutionContext::from_realm_and_function(
+            realm,
+            function_obj,
+            local_env.clone(),
+            EnvironmentRecord::default(),
+            script,
+        );
+        self.realm.borrow().push_execution_context(callee_context);
+        assert_eq!(
+            args.len(),
+            0,
+            "passing args to ordinary functions is not supported"
+        );
+    }
+
+    pub fn code(&self) -> &Function {
+        self.ecma_script_code.as_ref()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
-enum ThisMode {
+pub enum ThisMode {
     Lexical,
     // Strict,
     Global,
@@ -443,6 +510,10 @@ impl PropertyDescriptor {
             configurable,
             ..self
         }
+    }
+
+    pub fn is_configurable(&self) -> bool {
+        self.configurable
     }
 }
 

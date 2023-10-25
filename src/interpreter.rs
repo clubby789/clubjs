@@ -6,7 +6,7 @@ use crate::{
 };
 use either::Either;
 use environment_record::{EnvironmentRecord, GlobalEnvironmentRecord};
-use indexmap::set::Slice;
+use indexmap::IndexSet;
 use realm::Realm;
 use std::{
     cell::{Cell, Ref, RefCell, RefMut},
@@ -16,6 +16,8 @@ use std::{
     rc::Rc,
 };
 use value::{JSObject, JSValue, PropertyDescriptor};
+
+use self::value::AdditionalSlots;
 
 mod environment_record;
 mod realm;
@@ -53,7 +55,7 @@ impl<T> Deref for Shared<T> {
     }
 }
 
-struct ExecutionContext {
+pub struct ExecutionContext {
     function: JSValue,
     realm: Shared<Realm>,
     lexical_environment: EnvironmentRecord,
@@ -112,9 +114,14 @@ impl ExecutionContext {
         panic!("could not resolve binding `{name}`");
     }
 
-    pub fn strings(&self) -> &Slice<Symbol> {
-        if let Some(_) = self.function.to_object() {
-            todo!("function strings")
+    // TODO: make this a ref
+    pub fn strings(&self) -> IndexSet<Symbol> {
+        if let Some(obj) = self.function.to_object() {
+            let obj = obj.borrow();
+            let AdditionalSlots::Function(f) = obj.extra_slots() else {
+                unreachable!()
+            };
+            f.code().strings()
         } else {
             self.script.strings()
         }
@@ -251,7 +258,7 @@ impl Agent {
     pub fn script_evaluation(&self, script: ScriptRecord) {
         let env = self.realm.borrow().global_env.clone();
         let code = codegen::FunctionBuilder::codegen_script(script.ecma_script_code);
-        Self::global_declaration_instantiation(&code, env.clone());
+        Self::global_declaration_instantiation(&code, env.clone(), self.realm.clone());
 
         let global_env = EnvironmentRecord::Global(env);
         let script_context = ExecutionContext::from_realm(
@@ -268,15 +275,16 @@ impl Agent {
     fn global_declaration_instantiation(
         script: &codegen::Script,
         env: Shared<GlobalEnvironmentRecord>,
+        realm: Shared<Realm>,
     ) {
-        let mut env = env.borrow_mut();
+        let mut env_r = env.borrow_mut();
         let var_declarations = script.var_scoped_declarations().collect::<Vec<_>>();
 
         let mut declared_function_names = HashSet::new();
         let mut functions_to_initialize = vec![];
         for (sym, func) in var_declarations.iter().rev().filter_map(|(s, d)| {
             if let Declaration::Function(f) = d {
-                Some((*s, *f))
+                Some((*s, f.clone()))
             } else {
                 None
             }
@@ -284,7 +292,7 @@ impl Agent {
             if !declared_function_names.insert(sym) {
                 continue;
             }
-            functions_to_initialize.insert(0, func);
+            functions_to_initialize.insert(0, (sym, func));
         }
         let mut declared_var_names = HashSet::new();
         for sym in var_declarations.iter().filter_map(|(s, d)| {
@@ -302,15 +310,17 @@ impl Agent {
 
         for (dn, _) in script.lexically_scoped_declarations() {
             // TODO: support const
-            env.create_mutable_binding(dn, false);
+            env_r.create_mutable_binding(dn, false);
         }
 
-        for _ in functions_to_initialize {
-            todo!("initializing functions");
+        for (name, func) in functions_to_initialize {
+            let fo =
+                realm.instantiate_function_object(func, EnvironmentRecord::Global(env.clone()));
+            env_r.create_global_function_binding(name, fo, false);
         }
 
         for vn in declared_var_names {
-            env.create_global_var_binding(vn, false);
+            env_r.create_global_var_binding(vn, false);
         }
     }
 
@@ -321,14 +331,22 @@ impl Agent {
 
     fn step(&self) -> bool {
         let ctx = self.current_context();
-        let (code_len, op, names) = if let Some(_) = ctx.function.to_object() {
-            todo!()
+        let (op, names) = if let Some(obj) = ctx.function.to_object() {
+            let obj = obj.borrow();
+            let AdditionalSlots::Function(f) = obj.extra_slots() else {
+                unreachable!()
+            };
+            let Some(&op) = f.code().opcodes().get(ctx.state.pc.get()) else {
+                return false;
+            };
+            ctx.state.inc_pc();
+            (op, f.code().names())
         } else {
-            (
-                ctx.script.code().len(),
-                ctx.script.code()[ctx.state.pc.get()],
-                ctx.script.names(),
-            )
+            let Some(&op) = ctx.script.code().get(ctx.state.pc.get()) else {
+                return false;
+            };
+            ctx.state.inc_pc();
+            (op, ctx.script.names())
         };
         match op {
             Opcode::LoadIdent(n) => {
@@ -348,6 +366,11 @@ impl Agent {
             Opcode::LoadAcc(n) => {
                 ctx.state.mov_reg_acc(n);
             }
+            Opcode::Call0 => {
+                let target = ctx.state.acc.take();
+                drop(ctx);
+                self.do_call(target, []);
+            }
             Opcode::Call1(arg) => {
                 let target = ctx.state.acc.take();
                 let arg = ctx.state.regs[arg].take();
@@ -365,7 +388,7 @@ impl Agent {
             }
             o => todo!("{o:?} not implemented"),
         }
-        self.current_context().state.inc_pc() < code_len
+        true
     }
 
     fn do_call<const N: usize>(&self, target: JSValue, args: [JSValue; N]) {

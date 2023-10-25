@@ -39,6 +39,12 @@ pub struct Function {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParamList(Vec<FunctionParam>);
 
+impl ParamList {
+    pub fn into_inner(self) -> Vec<FunctionParam> {
+        self.0
+    }
+}
+
 impl Names for ParamList {
     fn lexically_declared_names(&self) -> impl Iterator<Item = Symbol> {
         std::iter::empty()

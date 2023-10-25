@@ -2,9 +2,12 @@ use std::fmt::Debug;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::codegen::Script;
+use crate::ast::FunctionParam;
+use crate::codegen::{Function, Script};
 use crate::lex::kw;
 
+use super::environment_record::EnvironmentRecord;
+use super::value::ThisMode;
 use super::{Agent, ExecutionContext, GlobalEnvironmentRecord};
 use super::{JSObject, JSValue, PropertyDescriptor, Shared};
 
@@ -157,5 +160,32 @@ impl Shared<Realm> {
         let prop = PropertyDescriptor::new(log_obj).enumerable(true);
         obj.define_own_property(kw::log, prop);
         JSValue::object(Shared::new(obj))
+    }
+
+    pub fn instantiate_function_object(
+        &self,
+        body: Rc<Function>,
+        env: EnvironmentRecord,
+    ) -> JSValue {
+        // TODO: %Function.prototype%
+        let params = body
+            .params()
+            .map(|p| {
+                let FunctionParam::Normal(sym) = p else {
+                    todo!("defaulted params aren't supported yet")
+                };
+                *sym
+            })
+            .collect();
+        let f = JSObject::ordinary_function_object(
+            None,
+            params,
+            body,
+            ThisMode::Global,
+            env,
+            self.clone(),
+        );
+        // TODO: set function name
+        JSValue::object(Shared::new(f))
     }
 }
