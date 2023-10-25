@@ -85,10 +85,6 @@ impl ObjectEnvironmentRecord {
         }
     }
 
-    pub fn outer_env(&self) -> Option<EnvironmentRecord> {
-        self.outer_env.clone()
-    }
-
     pub fn create_mutable_binding(&mut self, name: Symbol, deletable: bool) {
         self.binding_object.borrow_mut().define_property_or_throw(
             name,
@@ -131,10 +127,6 @@ impl DeclarativeEnvironmentRecord {
             outer_env,
             bindings: HashMap::new(),
         }
-    }
-
-    pub fn outer_env(&self) -> Option<EnvironmentRecord> {
-        self.outer_env.clone()
     }
 
     pub fn has_binding(&self, name: Symbol) -> bool {
@@ -194,16 +186,5 @@ impl EnvironmentRecord {
 impl Default for EnvironmentRecord {
     fn default() -> Self {
         EnvironmentRecord::Declarative(Shared::new(DeclarativeEnvironmentRecord::default()))
-    }
-}
-
-#[derive(Default, Debug)]
-pub struct PrivateEnvironmentRecord {
-    outer_private_env: Option<Shared<PrivateEnvironmentRecord>>,
-}
-
-impl PrivateEnvironmentRecord {
-    pub fn outer_private_env(&self) -> Option<&Shared<PrivateEnvironmentRecord>> {
-        self.outer_private_env.as_ref()
     }
 }

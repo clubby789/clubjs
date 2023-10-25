@@ -4,7 +4,7 @@ use crate::{
     intern::Symbol,
     span::Node,
 };
-use environment_record::{EnvironmentRecord, GlobalEnvironmentRecord, PrivateEnvironmentRecord};
+use environment_record::{EnvironmentRecord, GlobalEnvironmentRecord};
 use realm::Realm;
 use std::{
     cell::{Cell, Ref, RefCell, RefMut},

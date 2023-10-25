@@ -8,7 +8,7 @@ use crate::lex::kw;
 use super::{Agent, ExecutionContext, GlobalEnvironmentRecord};
 use super::{JSObject, JSValue, PropertyDescriptor, Shared};
 
-pub(super) struct Realm {
+pub struct Realm {
     intrinsics: RealmIntrinsics,
     global_object: Shared<JSObject>,
     pub global_env: Shared<GlobalEnvironmentRecord>,

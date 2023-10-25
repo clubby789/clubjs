@@ -6,9 +6,7 @@ use std::{
 
 use crate::{ast, codegen::Script, intern::Symbol, lex::kw};
 
-use super::{
-    EnvironmentRecord, ExecutionContext, PrivateEnvironmentRecord, Realm, ReferenceRecord, Shared,
-};
+use super::{EnvironmentRecord, ExecutionContext, Realm, ReferenceRecord, Shared};
 
 #[derive(Clone, Default)]
 pub struct JSValue {
@@ -260,7 +258,7 @@ impl JSObject {
     pub fn ordinary_function_object(
         function: ast::Function,
         _env: EnvironmentRecord,
-        _private_env: PrivateEnvironmentRecord,
+        // _private_env: PrivateEnvironmentRecord,
     ) -> Self {
         // 1. Let name be StringValue of BindingIdentifier.
         let _name = function.name.unwrap_or(kw::default);
@@ -363,7 +361,7 @@ impl BuiltinFunctionSlots {
 #[derive(Debug, Clone)]
 struct FunctionSlots {
     environment: EnvironmentRecord,
-    private_environment: Option<Shared<PrivateEnvironmentRecord>>,
+    // private_environment: Option<Shared<PrivateEnvironmentRecord>>,
     formal_paramaters: Vec<ast::FunctionParam>,
     ecma_script_code: ast::Block,
     realm: Shared<Realm>,
