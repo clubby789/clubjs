@@ -124,8 +124,20 @@ impl Realm {
 
 impl Shared<Realm> {
     pub fn set_custom_global_bindings(&self) {
-        let name = kw::console_log;
-        fn console_log(_: Shared<Realm>, _: JSValue, args: Vec<JSValue>) -> JSValue {
+        let console = self.console_object();
+        let prop = PropertyDescriptor::new(console)
+            .writable(true)
+            .configurable(true)
+            .enumerable(true);
+        self.borrow()
+            .global_object
+            .borrow_mut()
+            .define_property_or_throw(kw::console, prop)
+    }
+
+    fn console_object(&self) -> JSValue {
+        let mut obj = JSObject::ordinary_object(None);
+        fn log(_: Shared<Realm>, _: JSValue, args: Vec<JSValue>) -> JSValue {
             let mut peekable = args.into_iter().peekable();
             while let Some(a) = peekable.next() {
                 print!("{a}");
@@ -136,19 +148,14 @@ impl Shared<Realm> {
             println!();
             JSValue::undefined()
         }
-        let value = JSValue::object(Shared::new(JSObject::builtin_function_object(
-            console_log,
+        let log_obj = JSValue::object(Shared::new(JSObject::builtin_function_object(
+            log,
             0,
-            name,
+            kw::log,
             self.clone(),
         )));
-        let prop = PropertyDescriptor::new(value)
-            .writable(true)
-            .configurable(true)
-            .enumerable(true);
-        self.borrow()
-            .global_object
-            .borrow_mut()
-            .define_property_or_throw(name, prop)
+        let prop = PropertyDescriptor::new(log_obj).enumerable(true);
+        obj.define_own_property(kw::log, prop);
+        JSValue::object(Shared::new(obj))
     }
 }

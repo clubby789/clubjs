@@ -7,8 +7,8 @@ use smallvec::SmallVec;
 
 use crate::{
     ast::{
-        self, Block, Expression, ExpressionKind, Program, Scope, Statement, StatementKind,
-        VariableKind,
+        self, Block, Expression, ExpressionKind, MemberKey, Program, Scope, Statement,
+        StatementKind, VariableKind,
     },
     intern::Symbol,
     lex::{kw, Literal},
@@ -44,8 +44,17 @@ pub enum Opcode<TemporaryKind> {
     /// at the property name held in [`name`]
     StoreNamedProperty { obj: TemporaryKind, name: NameIndex },
     /// Store the value in the accumulator into the object in [`obj`],
-    /// at the property held in [`name`]
+    /// at the property held in [`index`]
     StoreComputedProperty {
+        obj: TemporaryKind,
+        index: TemporaryKind,
+    },
+    /// Load the property of the object held in the accumulator held in
+    /// [`name`], and store it in the accumulator.
+    GetNamedProperty { obj: TemporaryKind, name: NameIndex },
+    /// Load the property of the object held in the accumulator held in
+    /// [`index`], and store it in the accumulator.
+    GetComputedProperty {
         obj: TemporaryKind,
         index: TemporaryKind,
     },
@@ -55,6 +64,8 @@ pub enum Opcode<TemporaryKind> {
     LoadAcc(TemporaryKind),
     /// Load the given integer into acc
     LoadInt(u128),
+    /// Load the string at the nth index of this script/function's string table
+    LoadString(StringIndex),
     /// Call the function in the accumulator with no args
     Call0,
     /// Call the function in the accumulator with the arg in the given temporary
@@ -66,6 +77,7 @@ pub enum Opcode<TemporaryKind> {
 
 pub type TemporaryIndex = usize;
 pub type NameIndex = usize;
+pub type StringIndex = usize;
 
 #[derive(Debug, Default)]
 pub struct Script {
@@ -73,6 +85,7 @@ pub struct Script {
     variable_declarations: HashMap<Symbol, VariableKind>,
     functions: HashMap<Symbol, Function>,
     names: IndexSet<Symbol>,
+    strings: IndexSet<Symbol>,
 }
 
 impl Script {
@@ -82,6 +95,10 @@ impl Script {
 
     pub fn names(&self) -> &Slice<Symbol> {
         self.names.as_slice()
+    }
+
+    pub fn strings(&self) -> &Slice<Symbol> {
+        self.strings.as_slice()
     }
 }
 
@@ -160,6 +177,7 @@ pub struct FunctionBuilder {
     tmp_idx: TemporaryIndex,
     bound_names: HashMap<Symbol, VariableKind>,
     names: IndexSet<Symbol>,
+    strings: IndexSet<Symbol>,
 }
 
 impl FunctionBuilder {
@@ -177,6 +195,7 @@ impl FunctionBuilder {
             functions: f.functions,
             names: f.names,
             variable_declarations: f.bound_names,
+            strings: f.strings,
         }
     }
 
@@ -296,9 +315,6 @@ impl FunctionBuilder {
             ExpressionKind::New(_) => todo!(),
             ExpressionKind::Delete(_) => todo!(),
             ExpressionKind::Call(target, args) => {
-                if matches!(target.kind, ExpressionKind::Member(..)) {
-                    todo!("member calls")
-                }
                 self.codegen_expression(*target);
                 let func = self.store_temporary();
                 let args: Vec<_> = args
@@ -315,14 +331,49 @@ impl FunctionBuilder {
                     _ => todo!("calling length {}", args.len()),
                 }
             }
-            ExpressionKind::Member(_, _) => todo!(),
-            ExpressionKind::Literal(Literal::Integer(int)) => self.code.push(Opcode::LoadInt(int)),
+            ExpressionKind::Member(base, key) => {
+                self.codegen_expression(*base);
+                let base = self.store_temporary();
+                match key {
+                    MemberKey::Static(name) => {
+                        let name = self.add_name(name);
+                        self.code.push(Opcode::GetNamedProperty { obj: base, name })
+                    }
+                    MemberKey::Computed(expr) => {
+                        self.codegen_expression(*expr);
+                        let expr = self.store_temporary();
+                        self.code.push(Opcode::GetComputedProperty {
+                            obj: base,
+                            index: expr,
+                        })
+                    }
+                }
+            }
+            ExpressionKind::Literal(lit) => self.codegen_literal(lit),
             ExpressionKind::Literal(_) => todo!(),
             ExpressionKind::Identifier(ident) => {
                 let name = self.add_name(ident);
                 self.code.push(Opcode::LoadIdent(name))
             }
         }
+    }
+
+    fn codegen_literal(&mut self, lit: Literal) {
+        match lit {
+            Literal::Integer(n) => self.code.push(Opcode::LoadInt(n)),
+            Literal::String(s) => {
+                let idx = self.add_string(s);
+                self.code.push(Opcode::LoadString(idx))
+            }
+        }
+    }
+
+    /// Store the contents of the accumulator into the object in [`obj`]
+    /// with the property named [`name`]
+    fn store_named_property(&mut self, obj: TemporaryIndex, name: Symbol) {
+        let idx = self.add_name(name);
+        self.code
+            .push(Opcode::StoreNamedProperty { obj, name: idx })
     }
 
     /// Store the current contents of the accumulator into
@@ -344,11 +395,9 @@ impl FunctionBuilder {
         self.names.insert_full(name).0
     }
 
-    /// Store the contents of the accumulator into the object in [`obj`]
-    /// with the property named [`name`]
-    fn store_named_property(&mut self, obj: TemporaryIndex, name: Symbol) {
-        let idx = self.add_name(name);
-        self.code
-            .push(Opcode::StoreNamedProperty { obj, name: idx })
+    /// Add a new string to this function's [`Self::strings`] and return
+    /// the index.
+    fn add_string(&mut self, string: Symbol) -> StringIndex {
+        self.strings.insert_full(string).0
     }
 }

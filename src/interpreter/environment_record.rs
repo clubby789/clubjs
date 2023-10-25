@@ -110,7 +110,9 @@ impl ObjectEnvironmentRecord {
     }
 
     pub fn get_binding_value(&self, name: Symbol) -> JSValue {
-        self.binding_object.borrow().ordinary_get(name)
+        self.binding_object
+            .borrow()
+            .ordinary_get(name, JSValue::object(self.binding_object.clone()))
     }
 }
 

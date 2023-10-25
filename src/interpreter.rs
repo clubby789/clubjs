@@ -4,7 +4,9 @@ use crate::{
     intern::Symbol,
     span::Node,
 };
+use either::Either;
 use environment_record::{EnvironmentRecord, GlobalEnvironmentRecord};
+use indexmap::set::Slice;
 use realm::Realm;
 use std::{
     cell::{Cell, Ref, RefCell, RefMut},
@@ -100,7 +102,7 @@ impl ExecutionContext {
         while let Some(e) = env {
             if e.has_binding(name) {
                 return ReferenceRecord {
-                    base: e,
+                    base: Either::Left(e),
                     referenced_name: name,
                     this_value: None,
                 };
@@ -108,6 +110,14 @@ impl ExecutionContext {
             env = e.outer_env();
         }
         panic!("could not resolve binding `{name}`");
+    }
+
+    pub fn strings(&self) -> &Slice<Symbol> {
+        if let Some(_) = self.function.to_object() {
+            todo!("function strings")
+        } else {
+            self.script.strings()
+        }
     }
 }
 
@@ -155,10 +165,23 @@ impl Default for VmState {
 
 #[derive(Clone, Debug)]
 pub struct ReferenceRecord {
-    base: EnvironmentRecord,
+    base: Either<EnvironmentRecord, JSValue>,
     referenced_name: Symbol,
     // strict: bool,
     this_value: Option<JSValue>,
+}
+
+impl ReferenceRecord {
+    pub fn get_this_value(&self) -> JSValue {
+        self.this_value
+            .clone()
+            .unwrap_or_else(|| {
+                self.base
+                    .clone()
+                    .expect_right("callee ensures this is okay")
+            })
+            .clone()
+    }
 }
 
 pub struct Agent {
@@ -299,7 +322,7 @@ impl Agent {
     fn step(&self) -> bool {
         let ctx = self.current_context();
         let (code_len, op, names) = if let Some(_) = ctx.function.to_object() {
-            loop {}
+            todo!()
         } else {
             (
                 ctx.script.code().len(),
@@ -319,6 +342,9 @@ impl Agent {
             Opcode::LoadInt(n) => {
                 ctx.state.set_acc(JSValue::int(n));
             }
+            Opcode::LoadString(s) => {
+                ctx.state.set_acc(JSValue::string(ctx.strings()[s]));
+            }
             Opcode::LoadAcc(n) => {
                 ctx.state.mov_reg_acc(n);
             }
@@ -327,6 +353,15 @@ impl Agent {
                 let arg = ctx.state.regs[arg].take();
                 drop(ctx);
                 self.do_call(target, [arg]);
+            }
+            Opcode::GetNamedProperty { obj, name } => {
+                let base_value = ctx.state.regs[obj].take();
+                let name = names[name];
+                ctx.state.set_acc(JSValue::reference(ReferenceRecord {
+                    base: Either::Right(base_value),
+                    referenced_name: name,
+                    this_value: None,
+                }))
             }
             o => todo!("{o:?} not implemented"),
         }

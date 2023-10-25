@@ -4,6 +4,9 @@ use std::{
     rc::Rc,
 };
 
+use either::Either;
+use indexmap::IndexSet;
+
 use crate::{ast, codegen::Script, intern::Symbol, lex::kw};
 
 use super::{EnvironmentRecord, ExecutionContext, Realm, ReferenceRecord, Shared};
@@ -21,7 +24,7 @@ impl Debug for JSValue {
 
 impl Display for JSValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self.kind, f)
+        Display::fmt(&self.get_value().kind, f)
     }
 }
 
@@ -44,6 +47,12 @@ impl JSValue {
         }
     }
 
+    pub fn string(s: Symbol) -> Self {
+        Self {
+            kind: JSValueKind::String(s),
+        }
+    }
+
     pub fn object(obj: Shared<JSObject>) -> Self {
         Self {
             kind: JSValueKind::Object(obj),
@@ -54,6 +63,7 @@ impl JSValue {
         if let JSValueKind::Object(o) = &self.kind {
             Some(o.clone())
         } else {
+            // TODO: Implement ToObject properly
             None
         }
     }
@@ -77,8 +87,17 @@ impl JSValue {
             return self.clone();
         };
 
-        // TODO: property reference
-        r.base.get_binding_value(r.referenced_name)
+        match &r.base {
+            Either::Left(env) => env.get_binding_value(r.referenced_name),
+            Either::Right(val) => {
+                let object = val
+                    .get_value()
+                    .to_object()
+                    .unwrap_or_else(|| panic!("TypeError: {val} is not an object"));
+                let object = object.borrow();
+                object.ordinary_get(r.referenced_name, r.get_this_value())
+            }
+        }
     }
 }
 
@@ -150,8 +169,13 @@ impl Display for JSValueKind {
             JSValueKind::Number(n) => write!(f, "{n}"),
             JSValueKind::BigInt(_) => todo!(),
             JSValueKind::Object(_) => write!(f, "[object Object]"),
-            JSValueKind::Reference(r) => {
-                write!(f, "{}", r.base.get_binding_value(r.referenced_name))
+            JSValueKind::Reference(_) => {
+                /*match r.base {
+                    Either::Left(env) => env.get_binding_value(r.referenced_name),
+                    Either::Right(o) => Display::fmt(o)
+                }*/
+                // write!(f, "{}", r.base.get_binding_value(r.referenced_name))
+                unreachable!("we should never be printing a reference")
             }
         }
     }
@@ -211,7 +235,8 @@ impl JSObject {
         self.properties.get(&name).cloned()
     }
 
-    pub fn ordinary_get(&self, name: Symbol) -> JSValue {
+    pub fn ordinary_get(&self, name: Symbol, _receiver: JSValue) -> JSValue {
+        // TODO: use the receiver for getters
         let desc = self.get_own_property(name);
         if let Some(d) = desc {
             return d.value;
@@ -368,6 +393,8 @@ struct FunctionSlots {
     this_mode: ThisMode,
     // strict: bool,
     home_object: Shared<JSObject>,
+
+    strings: IndexSet<Symbol>,
 }
 
 #[derive(Debug, Clone, Copy)]

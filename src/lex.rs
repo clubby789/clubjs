@@ -106,7 +106,8 @@ pub mod kw {
         Infinity,
         NaN,
         undefined,
-        console_log,
+        console,
+        log,
         default,
     }
 }
