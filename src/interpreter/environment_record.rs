@@ -1,15 +1,15 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::intern::Symbol;
 
-use super::{JSObject, JSValue, Shared};
+use super::{value::PropertyDescriptor, JSObject, JSValue, Shared};
 
 #[derive(Default, Debug)]
 pub struct GlobalEnvironmentRecord {
     object_record: ObjectEnvironmentRecord,
     global_this: Shared<JSObject>,
     declarative_record: DeclarativeEnvironmentRecord,
-    var_names: Vec<Symbol>,
+    var_names: HashSet<Symbol>,
 }
 
 impl GlobalEnvironmentRecord {
@@ -21,18 +21,53 @@ impl GlobalEnvironmentRecord {
             object_record,
             global_this: this_value,
             declarative_record: dcl_rec,
-            var_names: vec![],
+            var_names: HashSet::new(),
         }
     }
 
     pub fn global_this(&self) -> &Shared<JSObject> {
         &self.global_this
     }
+
+    pub fn create_global_var_binding(&mut self, name: Symbol, deletable: bool) {
+        let should_create_binding = {
+            let global_obj = self.object_record.binding_object.borrow();
+            let has_prop = global_obj.has_own_property(name);
+            let extensible = global_obj.extensible();
+            !has_prop && extensible
+        };
+
+        if should_create_binding {
+            self.object_record.create_mutable_binding(name, deletable);
+        }
+
+        self.var_names.insert(name);
+    }
+
+    pub fn create_mutable_binding(&mut self, name: Symbol, deletable: bool) {
+        if self.declarative_record.has_binding(name) {
+            panic!("TypeError: binding `{name}` exists");
+        }
+        self.declarative_record
+            .create_mutable_binding(name, deletable);
+    }
+
+    pub fn has_binding(&self, name: Symbol) -> bool {
+        self.declarative_record.has_binding(name) || self.object_record.has_binding(name)
+    }
+
+    pub fn get_binding_value(&self, name: Symbol) -> JSValue {
+        if self.declarative_record.has_binding(name) {
+            self.declarative_record.get_binding_value(name)
+        } else {
+            self.object_record.get_binding_value(name)
+        }
+    }
 }
 
 #[derive(Default, Debug)]
 pub struct ObjectEnvironmentRecord {
-    outer_env: Option<Shared<EnvironmentRecord>>,
+    outer_env: Option<EnvironmentRecord>,
     binding_object: Shared<JSObject>,
     is_with_environment: bool,
 }
@@ -41,7 +76,7 @@ impl ObjectEnvironmentRecord {
     pub fn new_object_environment(
         binding_object: Shared<JSObject>,
         is_with_environment: bool,
-        outer_env: Option<Shared<EnvironmentRecord>>,
+        outer_env: Option<EnvironmentRecord>,
     ) -> Self {
         Self {
             binding_object,
@@ -50,28 +85,76 @@ impl ObjectEnvironmentRecord {
         }
     }
 
-    pub fn outer_env(&self) -> Option<&Shared<EnvironmentRecord>> {
-        self.outer_env.as_ref()
+    pub fn outer_env(&self) -> Option<EnvironmentRecord> {
+        self.outer_env.clone()
+    }
+
+    pub fn create_mutable_binding(&mut self, name: Symbol, deletable: bool) {
+        self.binding_object.borrow_mut().define_property_or_throw(
+            name,
+            PropertyDescriptor::default()
+                .writable(true)
+                .enumerable(true)
+                .configurable(deletable),
+        );
+    }
+
+    pub fn has_binding(&self, name: Symbol) -> bool {
+        let binding_object = &self.binding_object;
+        if !binding_object.borrow().has_property(name) {
+            return false;
+        }
+        if !self.is_with_environment {
+            return true;
+        }
+
+        // todo: unscopables
+
+        true
+    }
+
+    pub fn get_binding_value(&self, name: Symbol) -> JSValue {
+        self.binding_object.borrow().ordinary_get(name)
     }
 }
 
 /// Map of bindings to their values and their mutability
 #[derive(Default, Debug)]
 pub struct DeclarativeEnvironmentRecord {
-    outer_env: Option<Shared<EnvironmentRecord>>,
+    outer_env: Option<EnvironmentRecord>,
     bindings: HashMap<Symbol, (Option<JSValue>, bool)>,
 }
 
 impl DeclarativeEnvironmentRecord {
-    pub fn new(outer_env: Option<Shared<EnvironmentRecord>>) -> Self {
+    pub fn new(outer_env: Option<EnvironmentRecord>) -> Self {
         Self {
             outer_env,
             bindings: HashMap::new(),
         }
     }
 
-    pub fn outer_env(&self) -> Option<&Shared<EnvironmentRecord>> {
-        self.outer_env.as_ref()
+    pub fn outer_env(&self) -> Option<EnvironmentRecord> {
+        self.outer_env.clone()
+    }
+
+    pub fn has_binding(&self, name: Symbol) -> bool {
+        self.bindings.contains_key(&name)
+    }
+
+    pub fn create_mutable_binding(&mut self, name: Symbol, deletable: bool) {
+        debug_assert!(
+            !self.bindings.contains_key(&name),
+            "binding `{name}` exists"
+        );
+        self.bindings.insert(name, (None, deletable));
+    }
+
+    pub fn get_binding_value(&self, name: Symbol) -> JSValue {
+        self.bindings
+            .get(&name)
+            .map(|(v, _)| v.clone())
+            .unwrap_or_else(|| unreachable!("no binding for {name}"))
+            .unwrap_or_else(|| panic!("ReferenceError: {name} is uninitialized"))
     }
 }
 
@@ -80,6 +163,38 @@ pub enum EnvironmentRecord {
     Declarative(Shared<DeclarativeEnvironmentRecord>),
     Object(Shared<ObjectEnvironmentRecord>),
     Global(Shared<GlobalEnvironmentRecord>),
+}
+
+impl EnvironmentRecord {
+    pub fn outer_env(&self) -> Option<EnvironmentRecord> {
+        match self {
+            EnvironmentRecord::Declarative(d) => d.borrow().outer_env.clone(),
+            EnvironmentRecord::Object(o) => o.borrow().outer_env.clone(),
+            EnvironmentRecord::Global(_g) => None,
+        }
+    }
+
+    pub fn has_binding(&self, name: Symbol) -> bool {
+        match self {
+            EnvironmentRecord::Declarative(d) => d.borrow().has_binding(name),
+            EnvironmentRecord::Object(o) => o.borrow().has_binding(name),
+            EnvironmentRecord::Global(g) => g.borrow().has_binding(name),
+        }
+    }
+
+    pub fn get_binding_value(&self, name: Symbol) -> JSValue {
+        match self {
+            EnvironmentRecord::Declarative(d) => d.borrow().get_binding_value(name),
+            EnvironmentRecord::Object(o) => o.borrow().get_binding_value(name),
+            EnvironmentRecord::Global(g) => g.borrow().get_binding_value(name),
+        }
+    }
+}
+
+impl Default for EnvironmentRecord {
+    fn default() -> Self {
+        EnvironmentRecord::Declarative(Shared::new(DeclarativeEnvironmentRecord::default()))
+    }
 }
 
 #[derive(Default, Debug)]

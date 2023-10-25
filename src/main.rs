@@ -18,6 +18,6 @@ fn main() {
         .map_or_else(|| PathBuf::from("src.js"), |a| a.try_into().unwrap());
     let src = std::fs::read_to_string(&path).unwrap();
     let agent = Agent::new();
-    let script = agent.borrow().parse_script(&src, path);
-    agent.borrow_mut().script_evaluation(script);
+    let script = agent.parse_script(&src, path);
+    agent.script_evaluation(script);
 }

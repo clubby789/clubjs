@@ -101,6 +101,7 @@ pub mod kw {
             InstanceOf: "instanceof",
             Delete: "delete",
         }
+        Empty: "",
         globalThis,
         Infinity,
         NaN,

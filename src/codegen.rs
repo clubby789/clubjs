@@ -1,8 +1,8 @@
 #![allow(unused)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use indexmap::IndexSet;
+use indexmap::{set::Slice, IndexSet};
 use smallvec::SmallVec;
 
 use crate::{
@@ -11,7 +11,7 @@ use crate::{
         VariableKind,
     },
     intern::Symbol,
-    lex::Literal,
+    lex::{kw, Literal},
     span::Node,
 };
 
@@ -21,8 +21,8 @@ use crate::{
 pub enum Opcode<TemporaryKind> {
     /// Trigger the debugger
     Debugger,
-    /// Add the nth context of this function to the context stack
-    PushContext(usize),
+    /// Push a new context to the stack
+    PushContext,
     /// Remove the current context from the stack
     PopContext,
     /// Load <this> into the accumulator
@@ -59,49 +59,124 @@ pub enum Opcode<TemporaryKind> {
     Call0,
     /// Call the function in the accumulator with the arg in the given temporary
     Call1(TemporaryKind),
-    /// Resolve the given name in the environment
+    /// Resolve the given name in the environment, loading a
+    /// [`crate::interpreter::value::JSValueKind::Reference`] into the accumulator
     LoadIdent(NameIndex),
 }
 
 pub type TemporaryIndex = usize;
 pub type NameIndex = usize;
 
-#[derive(Debug)]
-pub struct Function {
+#[derive(Debug, Default)]
+pub struct Script {
     code: Vec<Opcode<TemporaryIndex>>,
-    scopes: SmallVec<[Scope; 255]>,
+    variable_declarations: HashMap<Symbol, VariableKind>,
     functions: HashMap<Symbol, Function>,
     names: IndexSet<Symbol>,
 }
 
+impl Script {
+    pub fn code(&self) -> &[Opcode<usize>] {
+        self.code.as_ref()
+    }
+
+    pub fn names(&self) -> &Slice<Symbol> {
+        self.names.as_slice()
+    }
+}
+
+impl ScopeAnalysis for Script {
+    fn declarations(&self) -> impl Iterator<Item = (Symbol, Declaration, VariableKind)> {
+        self.variable_declarations
+            .iter()
+            .map(|(n, k)| (*n, Declaration::Variable, *k))
+            .chain(
+                self.functions
+                    .iter()
+                    .map(|(n, k)| (*n, Declaration::Function(k), VariableKind::Var)),
+            )
+    }
+}
+
+#[derive(Debug)]
+pub struct Function {
+    code: Vec<Opcode<TemporaryIndex>>,
+    variable_declarations: HashMap<Symbol, VariableKind>,
+    functions: HashMap<Symbol, Function>,
+    names: IndexSet<Symbol>,
+    name: Symbol,
+}
+
+impl ScopeAnalysis for Function {
+    fn declarations(&self) -> impl Iterator<Item = (Symbol, Declaration, VariableKind)> {
+        self.variable_declarations
+            .iter()
+            .map(|(n, k)| (*n, Declaration::Variable, *k))
+            .chain(
+                self.functions
+                    .iter()
+                    .map(|(n, k)| (*n, Declaration::Function(k), VariableKind::Let)),
+            )
+    }
+}
+
+/// Implements the Syntax Directed Operations described in 8.2:
+/// Scope Analysis
+pub trait ScopeAnalysis {
+    fn declarations(&self) -> impl Iterator<Item = (Symbol, Declaration, VariableKind)>;
+    fn bound_names(&self) -> impl Iterator<Item = (Symbol, VariableKind)> {
+        self.declarations().map(|(s, d, v)| (s, v))
+    }
+    fn lexically_declared_names(&self) -> impl Iterator<Item = Symbol> {
+        self.bound_names()
+            .filter_map(|(n, v)| v.lexical().then_some(n))
+    }
+    fn lexically_scoped_declarations(&self) -> impl Iterator<Item = (Symbol, Declaration)> {
+        self.declarations()
+            .filter_map(|(n, k, v)| v.lexical().then_some((n, k)))
+    }
+    fn var_declared_names(&self) -> impl Iterator<Item = Symbol> {
+        self.bound_names().filter_map(|(n, v)| v.var().then_some(n))
+    }
+    fn var_scoped_declarations(&self) -> impl Iterator<Item = (Symbol, Declaration)> {
+        self.declarations()
+            .filter_map(|(n, k, v)| v.var().then_some((n, k)))
+    }
+}
+
+#[derive(Debug)]
+pub enum Declaration<'a> {
+    Variable,
+    Function(&'a Function),
+}
+
+// FIXME: refactor this into a generic 'codegen context'
 #[derive(Default)]
 pub struct FunctionBuilder {
     code: Vec<Opcode<TemporaryIndex>>,
-    base_scope: Scope,
-    scopes: SmallVec<[Scope; 255]>,
     functions: HashMap<Symbol, Function>,
     /// Holds the next temporary index to use,
     /// incrementing every time we allocate a new one
     tmp_idx: TemporaryIndex,
+    bound_names: HashMap<Symbol, VariableKind>,
     names: IndexSet<Symbol>,
 }
 
 impl FunctionBuilder {
-    pub fn codegen(script: Node<Program>) -> Function {
+    pub fn codegen_script(script: Node<Program>) -> Script {
         let mut f = Self {
             code: Vec::with_capacity(script.body.len()),
             ..Default::default()
         };
         let Block { statements, scope } = script.take().body;
-        f.base_scope = scope;
         for stmt in statements {
             f.codegen_statement(stmt)
         }
-        Function {
+        Script {
             code: f.code,
-            scopes: f.scopes,
             functions: f.functions,
             names: f.names,
+            variable_declarations: f.bound_names,
         }
     }
 
@@ -110,16 +185,18 @@ impl FunctionBuilder {
             code: Vec::with_capacity(func.body.len()),
             ..Default::default()
         };
+        let name = func.name.unwrap_or(kw::default);
+
         let Block { statements, scope } = func.take().body;
-        f.base_scope = scope;
         for stmt in statements {
             f.codegen_statement(stmt)
         }
         Function {
             code: f.code,
-            scopes: f.scopes,
             functions: f.functions,
             names: f.names,
+            variable_declarations: f.bound_names,
+            name,
         }
     }
 
@@ -134,8 +211,7 @@ impl FunctionBuilder {
             StatementKind::Empty => (),
             StatementKind::Debugger => self.code.push(Opcode::Debugger),
             StatementKind::Block(block) => {
-                self.code.push(Opcode::PushContext(self.scopes.len()));
-                self.scopes.push(block.scope);
+                self.code.push(Opcode::PushContext);
                 for stmt in block.statements {
                     self.codegen_statement(stmt);
                 }

@@ -1,11 +1,10 @@
-use std::cell::RefCell;
 use std::fmt::Debug;
 use std::rc::{Rc, Weak};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::intern::Symbol;
+use crate::codegen::Script;
 use crate::lex::kw;
 
-use super::value;
 use super::{Agent, ExecutionContext, GlobalEnvironmentRecord};
 use super::{JSObject, JSValue, PropertyDescriptor, Shared};
 
@@ -13,7 +12,7 @@ pub(super) struct Realm {
     intrinsics: RealmIntrinsics,
     global_object: Shared<JSObject>,
     pub global_env: Shared<GlobalEnvironmentRecord>,
-    agent: Weak<RefCell<Agent>>,
+    agent: Weak<Agent>,
 }
 
 impl Debug for Realm {
@@ -22,19 +21,46 @@ impl Debug for Realm {
     }
 }
 
-pub struct RealmIntrinsics;
+#[allow(non_snake_case)]
+pub struct RealmIntrinsics {
+    Object: ObjectIntrinsic,
+}
+
+impl RealmIntrinsics {
+    pub fn new() -> Self {
+        Self {
+            Object: ObjectIntrinsic::new(),
+        }
+    }
+}
+
+struct ObjectIntrinsic {
+    pub prototype: Shared<JSObject>,
+}
+
+impl ObjectIntrinsic {
+    pub fn new() -> Self {
+        Self {
+            prototype: Shared::new(JSObject::ordinary_object(None)),
+        }
+    }
+}
 
 impl Realm {
     pub fn new() -> Self {
+        static CREATED: AtomicBool = AtomicBool::new(false);
+        if CREATED.swap(true, Ordering::Relaxed) {
+            panic!("creating multiple realms is not supported");
+        }
         Self {
-            intrinsics: RealmIntrinsics,
+            intrinsics: RealmIntrinsics::new(),
             global_object: Shared::new(JSObject::default()),
             global_env: Shared::new(GlobalEnvironmentRecord::default()),
             agent: Weak::new(),
         }
     }
 
-    pub(super) fn set_agent(&mut self, agent: Weak<RefCell<Agent>>) {
+    pub(super) fn set_agent(&mut self, agent: Weak<Agent>) {
         assert!(
             self.agent.upgrade().is_none(),
             "a realm's agent should only be set once, after the agent is constructed"
@@ -47,7 +73,11 @@ impl Realm {
         global_obj: Option<Shared<JSObject>>,
         this_value: Option<Shared<JSObject>>,
     ) {
-        let global_obj = global_obj.unwrap_or_else(|| todo!("OrdinaryObjectCreate"));
+        let global_obj = global_obj.unwrap_or_else(|| {
+            Shared::new(JSObject::ordinary_object(Some(
+                self.intrinsics.Object.prototype.clone(),
+            )))
+        });
         let this_value = this_value.unwrap_or_else(|| global_obj.clone());
         self.global_object = global_obj.clone();
         self.global_env = Shared::new(GlobalEnvironmentRecord::new_global_environment(
@@ -69,36 +99,50 @@ impl Realm {
             (kw::NaN, PropertyDescriptor::default()),
             (kw::undefined, PropertyDescriptor::default()),
         ] {
-            self.global_object
-                .borrow_mut()
-                .define_property_or_throw(name, prop);
+            global.borrow_mut().define_property_or_throw(name, prop);
         }
     }
 
-    fn agent(&self) -> Rc<RefCell<Agent>> {
+    fn agent(&self) -> Rc<Agent> {
         self.agent
             .upgrade()
             .expect("realm should not outlive agent")
     }
 
     pub fn push_execution_context(&self, context: ExecutionContext) {
-        self.agent().borrow_mut().push_context(context);
+        self.agent().push_context(context);
     }
 
     pub fn pop_execution_context(&self) -> ExecutionContext {
-        self.agent().borrow_mut().pop_context()
+        self.agent().pop_context()
+    }
+
+    pub fn script(&self) -> Rc<Script> {
+        self.agent().current_context().script.clone()
     }
 }
 
 impl Shared<Realm> {
     pub fn set_custom_global_bindings(&self) {
         let name = kw::console_log;
-        fn console_log(_: Shared<Realm>, _: Option<JSValue>, args: Vec<JSValue>) -> JSValue {
-            println!("{args:?}");
+        fn console_log(_: Shared<Realm>, _: JSValue, args: Vec<JSValue>) -> JSValue {
+            let mut peekable = args.into_iter().peekable();
+            while let Some(a) = peekable.next() {
+                print!("{a}");
+                if peekable.peek().is_some() {
+                    print!(" ");
+                }
+            }
+            println!();
             JSValue::undefined()
         }
-        let value = JSObject::builtin_function_object(console_log, 0, name, self.clone());
-        let prop = PropertyDescriptor::default()
+        let value = JSValue::object(Shared::new(JSObject::builtin_function_object(
+            console_log,
+            0,
+            name,
+            self.clone(),
+        )));
+        let prop = PropertyDescriptor::new(value)
             .writable(true)
             .configurable(true)
             .enumerable(true);

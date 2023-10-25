@@ -1,17 +1,17 @@
-#![allow(unused)]
-
-use crate::{ast, intern::Symbol, lex::kw, span::Node};
-use environment_record::{
-    DeclarativeEnvironmentRecord, EnvironmentRecord, GlobalEnvironmentRecord,
-    ObjectEnvironmentRecord, PrivateEnvironmentRecord,
+use crate::{
+    ast,
+    codegen::{self, Declaration, Opcode, ScopeAnalysis, Script},
+    intern::Symbol,
+    span::Node,
 };
+use environment_record::{EnvironmentRecord, GlobalEnvironmentRecord, PrivateEnvironmentRecord};
 use realm::Realm;
 use std::{
-    cell::{Ref, RefCell, RefMut},
-    collections::{hash_map::Entry, HashMap},
+    cell::{Cell, Ref, RefCell, RefMut},
+    collections::HashSet,
     ops::Deref,
     path::PathBuf,
-    rc::{Rc, Weak},
+    rc::Rc,
 };
 use value::{JSObject, JSValue, PropertyDescriptor};
 
@@ -57,6 +57,8 @@ struct ExecutionContext {
     lexical_environment: EnvironmentRecord,
     variable_environment: EnvironmentRecord,
     // private_environment: Option<PrivateEnvironmentRecord>,
+    script: Rc<Script>,
+    state: VmState,
 }
 
 impl ExecutionContext {
@@ -64,12 +66,15 @@ impl ExecutionContext {
         realm: Shared<Realm>,
         lexical_environment: EnvironmentRecord,
         variable_environment: EnvironmentRecord,
+        script: Rc<Script>,
     ) -> ExecutionContext {
         Self {
             function: JSValue::null(),
             realm,
             lexical_environment,
             variable_environment,
+            script,
+            state: VmState::default(),
         }
     }
 
@@ -78,19 +83,87 @@ impl ExecutionContext {
         function: JSValue,
         lexical_environment: EnvironmentRecord,
         variable_environment: EnvironmentRecord,
+        script: Rc<Script>,
     ) -> ExecutionContext {
         Self {
             function,
             realm,
             lexical_environment,
             variable_environment,
+            script,
+            state: VmState::default(),
+        }
+    }
+
+    pub fn resolve_binding(&self, name: Symbol, env: Option<EnvironmentRecord>) -> ReferenceRecord {
+        let mut env = Some(env.unwrap_or(self.lexical_environment.clone()));
+        while let Some(e) = env {
+            if e.has_binding(name) {
+                return ReferenceRecord {
+                    base: e,
+                    referenced_name: name,
+                    this_value: None,
+                };
+            }
+            env = e.outer_env();
+        }
+        panic!("could not resolve binding `{name}`");
+    }
+}
+
+pub const REG_COUNT: usize = 255;
+/// Interpreter state associated with a specific execution context
+struct VmState {
+    pc: Cell<usize>,
+    acc: Cell<JSValue>,
+    regs: [Cell<JSValue>; REG_COUNT],
+}
+
+impl VmState {
+    pub fn inc_pc(&self) -> usize {
+        let old = self.pc.get();
+        self.pc.set(old + 1);
+        old + 1
+    }
+
+    /// Moves from a register into acc, setting the register value
+    /// to null
+    pub fn mov_reg_acc(&self, reg: usize) {
+        self.acc.set(self.regs[reg].take());
+    }
+
+    /// Moves from acc into a register, setting the value of acc
+    /// to null
+    pub fn mov_acc_reg(&self, reg: usize) {
+        self.regs[reg].set(self.acc.take());
+    }
+
+    pub fn set_acc(&self, value: JSValue) {
+        self.acc.set(value);
+    }
+}
+
+impl Default for VmState {
+    fn default() -> Self {
+        Self {
+            pc: Default::default(),
+            acc: Cell::new(JSValue::null()),
+            regs: std::array::from_fn(|_| Cell::new(JSValue::null())),
         }
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ReferenceRecord {
+    base: EnvironmentRecord,
+    referenced_name: Symbol,
+    // strict: bool,
+    this_value: Option<JSValue>,
+}
+
 pub struct Agent {
     realm: Shared<Realm>,
-    contexts: Vec<ExecutionContext>,
+    contexts: RefCell<Vec<ExecutionContext>>,
 }
 
 pub struct ScriptRecord {
@@ -99,34 +172,50 @@ pub struct ScriptRecord {
 }
 
 impl Agent {
-    pub fn new() -> Rc<RefCell<Self>> {
+    pub fn new() -> Rc<Self> {
         let realm = Shared::new(Realm::new());
-        let agent = Rc::new(RefCell::new(Self {
+        // FIXME: either make the real global context here, or refactor so this isn't needed
+        // maybe an 'initialise' call which must run before parsing
+        let outer_ctx = ExecutionContext::from_realm(
+            realm.clone(),
+            EnvironmentRecord::default(),
+            EnvironmentRecord::default(),
+            Rc::new(Script::default()),
+        );
+        let agent = Rc::new(Self {
             realm: realm.clone(),
-            contexts: vec![],
-        }));
+            contexts: RefCell::new(vec![outer_ctx]),
+        });
         let mut r = realm.borrow_mut();
         r.set_global_object(None, None);
+        r.set_default_global_bindings();
         r.set_agent(Rc::downgrade(&agent));
+        drop(r);
+        realm.set_custom_global_bindings();
         agent
     }
 
-    fn current_context(&self) -> &ExecutionContext {
-        self.contexts.last().expect("should always have a context")
+    fn current_context(&self) -> Ref<'_, ExecutionContext> {
+        fn get_last(v: &Vec<ExecutionContext>) -> &ExecutionContext {
+            v.last().expect("should always have a context")
+        }
+        Ref::map(self.contexts.borrow(), get_last)
     }
 
-    fn current_context_mut(&mut self) -> &mut ExecutionContext {
+    fn script(&self) -> Rc<Script> {
+        self.current_context().script.clone()
+    }
+
+    fn push_context(&self, context: ExecutionContext) {
+        self.contexts.borrow_mut().push(context)
+    }
+
+    fn pop_context(&self) -> ExecutionContext {
+        debug_assert!(self.contexts.borrow().len() >= 2);
         self.contexts
-            .last_mut()
+            .borrow_mut()
+            .pop()
             .expect("should always have a context")
-    }
-
-    fn push_context(&mut self, context: ExecutionContext) {
-        self.contexts.push(context)
-    }
-
-    fn pop_context(&mut self) -> ExecutionContext {
-        self.contexts.pop().expect("should always have a context")
     }
 
     pub fn parse_script(&self, source: &str, path: PathBuf) -> ScriptRecord {
@@ -136,15 +225,128 @@ impl Agent {
         }
     }
 
-    pub fn script_evaluation(&mut self, script: ScriptRecord) {
-        let global_env = EnvironmentRecord::Global(self.realm.borrow().global_env.clone());
+    pub fn script_evaluation(&self, script: ScriptRecord) {
+        let env = self.realm.borrow().global_env.clone();
+        let code = codegen::FunctionBuilder::codegen_script(script.ecma_script_code);
+        Self::global_declaration_instantiation(&code, env.clone());
+
+        let global_env = EnvironmentRecord::Global(env);
         let script_context = ExecutionContext::from_realm(
             self.realm.clone(),
             global_env.clone(),
             global_env.clone(),
+            Rc::new(code),
         );
         self.push_context(script_context);
-        // TODO: run it lmao
+        self.run();
         self.pop_context();
+    }
+
+    fn global_declaration_instantiation(
+        script: &codegen::Script,
+        env: Shared<GlobalEnvironmentRecord>,
+    ) {
+        let mut env = env.borrow_mut();
+        let var_declarations = script.var_scoped_declarations().collect::<Vec<_>>();
+
+        let mut declared_function_names = HashSet::new();
+        let mut functions_to_initialize = vec![];
+        for (sym, func) in var_declarations.iter().rev().filter_map(|(s, d)| {
+            if let Declaration::Function(f) = d {
+                Some((*s, *f))
+            } else {
+                None
+            }
+        }) {
+            if !declared_function_names.insert(sym) {
+                continue;
+            }
+            functions_to_initialize.insert(0, func);
+        }
+        let mut declared_var_names = HashSet::new();
+        for sym in var_declarations.iter().filter_map(|(s, d)| {
+            if let Declaration::Variable = d {
+                Some(*s)
+            } else {
+                None
+            }
+        }) {
+            if declared_function_names.contains(&sym) {
+                continue;
+            }
+            declared_var_names.insert(sym);
+        }
+
+        for (dn, _) in script.lexically_scoped_declarations() {
+            // TODO: support const
+            env.create_mutable_binding(dn, false);
+        }
+
+        for _ in functions_to_initialize {
+            todo!("initializing functions");
+        }
+
+        for vn in declared_var_names {
+            env.create_global_var_binding(vn, false);
+        }
+    }
+
+    fn run(&self) -> JSValue {
+        while self.step() {}
+        JSValue::undefined()
+    }
+
+    fn step(&self) -> bool {
+        let ctx = self.current_context();
+        let (code_len, op, names) = if let Some(_) = ctx.function.to_object() {
+            loop {}
+        } else {
+            (
+                ctx.script.code().len(),
+                ctx.script.code()[ctx.state.pc.get()],
+                ctx.script.names(),
+            )
+        };
+        match op {
+            Opcode::LoadIdent(n) => {
+                let name = names[n];
+                let reference = ctx.resolve_binding(name, None);
+                ctx.state.set_acc(JSValue::reference(reference));
+            }
+            Opcode::StoreAcc(n) => {
+                ctx.state.mov_acc_reg(n);
+            }
+            Opcode::LoadInt(n) => {
+                ctx.state.set_acc(JSValue::int(n));
+            }
+            Opcode::LoadAcc(n) => {
+                ctx.state.mov_reg_acc(n);
+            }
+            Opcode::Call1(arg) => {
+                let target = ctx.state.acc.take();
+                let arg = ctx.state.regs[arg].take();
+                drop(ctx);
+                self.do_call(target, [arg]);
+            }
+            o => todo!("{o:?} not implemented"),
+        }
+        self.current_context().state.inc_pc() < code_len
+    }
+
+    fn do_call<const N: usize>(&self, target: JSValue, args: [JSValue; N]) {
+        let this_value = if target.to_reference().is_some() {
+            // TODO: property reference
+            JSValue::undefined()
+        } else {
+            JSValue::undefined()
+        };
+        let target = target.get_value();
+        let Some(func) = target.to_object() else {
+            panic!("TypeError: call target is not an object")
+        };
+        if !func.borrow().callable() {
+            panic!("TypeError: call target is not callable")
+        }
+        func.call(self.script(), this_value, args.to_vec());
     }
 }

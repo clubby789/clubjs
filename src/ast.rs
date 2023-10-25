@@ -75,19 +75,21 @@ pub struct VariableDeclaration {
 
 impl Names for VariableDeclaration {
     fn lexically_declared_names(&self) -> impl Iterator<Item = Symbol> {
-        self.kind
-            .lexical()
-            .then_some(self.declarations.iter())
-            .unwrap_or([].iter())
-            .map(|v| v.name)
+        if self.kind.lexical() {
+            self.declarations.iter()
+        } else {
+            [].iter()
+        }
+        .map(|v| v.name)
     }
 
     fn var_declared_names(&self) -> impl Iterator<Item = Symbol> {
-        self.kind
-            .var()
-            .then_some(self.declarations.iter())
-            .unwrap_or([].iter())
-            .map(|v| v.name)
+        if self.kind.var() {
+            self.declarations.iter()
+        } else {
+            [].iter()
+        }
+        .map(|v| v.name)
     }
 
     fn bound_names(&self) -> impl Iterator<Item = Symbol> {
