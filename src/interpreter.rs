@@ -16,13 +16,21 @@ use std::{
 };
 use value::{JSObject, JSValue, PropertyDescriptor};
 
+use self::value::ThisMode;
+
 mod environment_record;
 mod realm;
 mod value;
 
 // TODO: make this gc?
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Shared<T>(Rc<RefCell<T>>);
+
+impl<T: std::fmt::Debug> std::fmt::Debug for Shared<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, f)
+    }
+}
 
 impl<T> Clone for Shared<T> {
     fn clone(&self) -> Self {
