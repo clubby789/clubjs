@@ -357,7 +357,7 @@ impl JSObject {
             if let Some(v) = parent.borrow().get_own_property(name) {
                 return v.value;
             }
-            cur = self.get_prototype_of();
+            cur = parent.borrow().get_prototype_of();
         }
         JSValue::undefined()
     }
