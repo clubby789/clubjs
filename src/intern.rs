@@ -1,11 +1,14 @@
 use bumpalo::Bump;
 use core::fmt;
+use fxhash::FxBuildHasher;
 use once_cell::sync::Lazy;
 use std::{
     collections::HashMap,
     fmt::{Debug, Display},
     sync::Mutex,
 };
+
+use crate::lex::kw::SYMBOL_VALUES;
 
 pub static INTERNER: Lazy<Mutex<Interner>> = Lazy::new(|| Mutex::new(Interner::new()));
 
@@ -57,13 +60,23 @@ impl Display for Symbol {
 pub struct Interner<'a> {
     arena: Bump,
     strings: Vec<&'a str>,
-    names: HashMap<&'a str, Symbol>,
+    names: HashMap<&'a str, Symbol, FxBuildHasher>,
 }
 
 impl<'a> Interner<'a> {
+    /// Private as it does not initialize the preinterned strings
+    /// Allocates cap * 8 bytes for the arena
+    fn with_capacity(cap: usize) -> Self {
+        Self {
+            arena: Bump::with_capacity(cap * 8),
+            strings: Vec::with_capacity(cap),
+            names: HashMap::with_capacity_and_hasher(cap, FxBuildHasher::default()),
+        }
+    }
+
     pub fn new() -> Self {
-        let mut s = Self::default();
-        for kw in crate::lex::kw::SYMBOL_VALUES {
+        let mut s = Self::with_capacity(SYMBOL_VALUES.len());
+        for kw in SYMBOL_VALUES {
             s.intern(kw);
         }
         s
