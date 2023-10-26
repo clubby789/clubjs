@@ -32,6 +32,8 @@ impl Display for JSValue {
     }
 }
 
+
+#[allow(clippy::wrong_self_convention)] // We use ES6's naming scheme
 impl JSValue {
     pub fn undefined() -> Self {
         Self {
@@ -48,6 +50,12 @@ impl JSValue {
     pub fn int(n: u128) -> Self {
         Self {
             kind: JSValueKind::Number(n as f64),
+        }
+    }
+
+    pub fn number(n: f64) -> Self {
+        Self {
+            kind: JSValueKind::Number(n),
         }
     }
 
@@ -100,6 +108,10 @@ impl JSValue {
         }
     }
 
+    pub fn same_type(&self, other: &Self) -> bool {
+        std::mem::discriminant(&self.kind) == std::mem::discriminant(&other.kind)
+    }
+
     pub fn get_value(&self) -> Self {
         let Some(r) = self.as_reference() else {
             return self.clone();
@@ -115,6 +127,47 @@ impl JSValue {
                 let object = object.borrow();
                 object.ordinary_get(r.referenced_name, r.get_this_value())
             }
+        }
+    }
+
+    // TODO: preferred type
+    pub fn to_primitive(self) -> Self {
+        let JSValueKind::Object(_o) = self.kind else {
+            return self;
+        };
+        todo!("converting object to primitive")
+    }
+
+    pub fn to_numeric(self) -> Self {
+        let prim = self.to_primitive();
+        if let JSValueKind::BigInt(_) = prim.kind {
+            todo!("bigints");
+        };
+        prim.to_number()
+    }
+
+    pub fn to_number(self) -> Self {
+        match self.kind {
+            JSValueKind::Number(_) => self,
+            JSValueKind::Symbol { .. } | JSValueKind::BigInt(_) => {
+                panic!("TypeError: converting `{self}` to a number")
+            }
+            JSValueKind::Undefined => Self::number(f64::NAN),
+            JSValueKind::Null => Self::number(0.0),
+            JSValueKind::Bool(b) => Self::number(b as u8 as f64),
+            JSValueKind::String(s) => Self::number(s.as_str().parse().unwrap_or(f64::NAN)),
+            JSValueKind::Object(_) => todo!("requires toprimitive preferred"),
+            JSValueKind::Reference(_) => unreachable!(),
+        }
+    }
+
+    /// Adds together two [`JSValueKind::Number`]s or [`JSValueKind::BigInt`]s
+    pub fn add(self, other: Self) -> Self {
+        debug_assert!(self.same_type(&other));
+        match (self.kind, other.kind) {
+            (JSValueKind::Number(l), JSValueKind::Number(r)) => JSValue::number(l + r),
+            (JSValueKind::BigInt(_), JSValueKind::BigInt(_)) => todo!("bigint::add"),
+            _ => unreachable!(),
         }
     }
 }

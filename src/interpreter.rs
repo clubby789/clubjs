@@ -384,6 +384,10 @@ impl Agent {
                     this_value: None,
                 }))
             }
+            Opcode::Add(l, r) => {
+                let res = self.do_add(ctx.state.regs[l].take(), ctx.state.regs[r].take());
+                ctx.state.set_acc(res);
+            }
             o => todo!("{o:?} not implemented"),
         }
         true
@@ -404,5 +408,18 @@ impl Agent {
             panic!("TypeError: call target is not callable")
         }
         func.call(self.script(), this_value, args.to_vec());
+    }
+
+    fn do_add(&self, left: JSValue, right: JSValue) -> JSValue {
+        let lprim = left.to_primitive();
+        let rprim = right.to_primitive();
+        // TODO: strings
+        let lnum = lprim.to_numeric();
+        let rnum = rprim.to_numeric();
+        assert!(
+            lnum.same_type(&rnum),
+            "TypeError: adding `{lnum}` and `{rnum}`"
+        );
+        lnum.add(rnum)
     }
 }

@@ -10,8 +10,8 @@ use smallvec::SmallVec;
 
 use crate::{
     ast::{
-        self, Block, Expression, ExpressionKind, MemberKey, Program, Scope, Statement,
-        StatementKind, VariableKind,
+        self, BinaryOperator, Block, Expression, ExpressionKind, MemberKey, Program, Scope,
+        Statement, StatementKind, VariableKind,
     },
     intern::Symbol,
     lex::{kw, Literal},
@@ -76,6 +76,9 @@ pub enum Opcode<TemporaryKind> {
     /// Resolve the given name in the environment, loading a
     /// [`crate::interpreter::value::JSValueKind::Reference`] into the accumulator
     LoadIdent(NameIndex),
+    /// Perform addition of the two given registers, according to 13.15.3 ApplyStringOrNumericBinaryOperator,
+    /// storing the result in the accumulator
+    Add(TemporaryKind, TemporaryKind),
 }
 
 pub type TemporaryIndex = usize;
@@ -338,7 +341,7 @@ impl FunctionBuilder {
             ExpressionKind::Function(_) => todo!(),
             ExpressionKind::Arrow(_) => todo!(),
             ExpressionKind::Unary(_, _) => todo!(),
-            ExpressionKind::Binary(_, _, _) => todo!(),
+            ExpressionKind::Binary(l, op, r) => self.codegen_binary(*l, op, *r),
             ExpressionKind::Assignment(_, _, _) => todo!(),
             ExpressionKind::Update(_, _, _) => todo!(),
             ExpressionKind::Logical(_, _, _) => todo!(),
@@ -403,6 +406,18 @@ impl FunctionBuilder {
                 self.code.push(Opcode::LoadString(idx))
             }
         }
+    }
+
+    /// Evaluate first the left, then right expression, then perform
+    /// the given operation on them, storing the result in the accumulator
+    fn codegen_binary(&mut self, l: Node<Expression>, op: BinaryOperator, r: Node<Expression>) {
+        let left = self.codegen_expression_to_temporary(l);
+        let right = self.codegen_expression_to_temporary(r);
+        let op = match op {
+            BinaryOperator::Plus => Opcode::Add(left, right),
+            o => todo!("`{o:?}`"),
+        };
+        self.code.push(op);
     }
 
     /// Store the contents of the accumulator into the object in [`obj`]
