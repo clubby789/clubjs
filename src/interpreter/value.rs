@@ -129,6 +129,32 @@ impl JSValue {
         }
     }
 
+    pub fn put_value(&self, val: JSValue) {
+        let JSValueKind::Reference(r) = &self.kind else {
+            panic!("ReferenceError: not a reference")
+        };
+        // TODO: set on global if unresolved
+        match &r.base {
+            Either::Left(env) => {
+                env.set_mutable_binding(r.referenced_name, val);
+            }
+            Either::Right(val) => {
+                let base_obj = val.clone().to_object();
+                base_obj
+                    .borrow()
+                    .ordinary_set(r.referenced_name, val.clone(), r.get_this_value());
+            }
+        }
+    }
+
+    pub fn to_object(self) -> Shared<JSObject> {
+        if let JSValueKind::Object(o) = self.kind {
+            o
+        } else {
+            todo!("other ToObject conversions")
+        }
+    }
+
     // TODO: preferred type
     pub fn to_primitive(self) -> Self {
         let JSValueKind::Object(_o) = self.kind else {
@@ -299,6 +325,21 @@ impl JSObject {
         }
     }
 
+    pub fn create_data_property(&mut self, name: Symbol, value: JSValue) -> bool {
+        let prop = PropertyDescriptor::new(value)
+            .writable(true)
+            .configurable(true)
+            .enumerable(true);
+        self.define_own_property(name, prop)
+    }
+
+    pub fn create_data_property_or_throw(&mut self, name: Symbol, value: JSValue) {
+        assert!(
+            self.create_data_property(name, value),
+            "TypeError: could not set `{name}`++"
+        )
+    }
+
     // TODO: property keys
     pub fn get_own_property(&self, name: Symbol) -> Option<PropertyDescriptor> {
         // TODO: accessor properties
@@ -319,6 +360,41 @@ impl JSObject {
             cur = self.get_prototype_of();
         }
         JSValue::undefined()
+    }
+
+    pub fn ordinary_set(&self, name: Symbol, value: JSValue, receiver: JSValue) -> bool {
+        // TODO: use the receiver for getters
+        let own_desc = if let Some(desc) = self.get_own_property(name) {
+            desc
+        } else {
+            if let Some(parent) = self.get_prototype_of() {
+                return parent.borrow().ordinary_set(name, value, receiver);
+            }
+            PropertyDescriptor::default()
+                .writable(true)
+                .enumerable(true)
+                .configurable(true)
+        };
+        // TODO: accessors
+        if !own_desc.writable {
+            return false;
+        }
+        let Some(recv_obj) = receiver.as_object() else {
+            return false;
+        };
+        let mut borrow = recv_obj.borrow_mut();
+        if let Some(existing) = borrow.get_own_property(name) {
+            if !existing.writable {
+                return false;
+            }
+            let prop = PropertyDescriptor::new(value)
+                .writable(true)
+                .enumerable(true)
+                .configurable(true);
+            borrow.define_own_property(name, prop)
+        } else {
+            borrow.create_data_property(name, value)
+        }
     }
 
     pub fn has_own_property(&self, name: Symbol) -> bool {

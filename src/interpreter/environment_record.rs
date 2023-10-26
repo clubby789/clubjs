@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use crate::intern::Symbol;
 
@@ -72,6 +72,20 @@ impl GlobalEnvironmentRecord {
             .create_mutable_binding(name, deletable);
     }
 
+    pub fn initialize_binding(&mut self, name: Symbol, value: JSValue) {
+        if self.declarative_record.has_binding(name) {
+            return self.declarative_record.initialize_binding(name, value);
+        }
+        self.object_record.initialize_binding(name, value);
+    }
+
+    pub fn set_mutable_binding(&mut self, name: Symbol, value: JSValue) {
+        if self.declarative_record.has_binding(name) {
+            return self.declarative_record.set_mutable_binding(name, value);
+        }
+        self.object_record.set_mutable_binding(name, value);
+    }
+
     pub fn has_binding(&self, name: Symbol) -> bool {
         self.declarative_record.has_binding(name) || self.object_record.has_binding(name)
     }
@@ -113,6 +127,19 @@ impl ObjectEnvironmentRecord {
                 .enumerable(true)
                 .configurable(deletable),
         );
+    }
+
+    pub fn initialize_binding(&mut self, name: Symbol, value: JSValue) {
+        self.set_mutable_binding(name, value);
+    }
+
+    pub fn set_mutable_binding(&self, name: Symbol, value: JSValue) {
+        // TODO: if strict check still exists
+        // let still_exists = self.binding_object.borrow().has_property(name);
+        let obj = self.binding_object.clone();
+        self.binding_object
+            .borrow()
+            .ordinary_set(name, value, JSValue::object(obj));
     }
 
     pub fn has_binding(&self, name: Symbol) -> bool {
@@ -163,6 +190,31 @@ impl DeclarativeEnvironmentRecord {
         self.bindings.insert(name, (None, deletable));
     }
 
+    pub fn initialize_binding(&mut self, name: Symbol, value: JSValue) {
+        self.bindings
+            .get_mut(&name)
+            .expect("we should already have a binding")
+            .0 = Some(value);
+    }
+
+    pub fn set_mutable_binding(&mut self, name: Symbol, value: JSValue) {
+        match self.bindings.entry(name) {
+            Entry::Occupied(mut o) => {
+                if o.get().0.is_none() {
+                    panic!("ReferenceError: {name} is uninitialized");
+                }
+                if !o.get().1 {
+                    panic!("TypeError: {name} is immutable");
+                }
+                o.get_mut().0 = Some(value);
+            }
+            Entry::Vacant(v) => {
+                // TODO: referenceerror if strict
+                v.insert((Some(value), true));
+            }
+        }
+    }
+
     pub fn get_binding_value(&self, name: Symbol) -> JSValue {
         self.bindings
             .get(&name)
@@ -201,6 +253,22 @@ impl EnvironmentRecord {
             EnvironmentRecord::Declarative(d) => d.borrow().get_binding_value(name),
             EnvironmentRecord::Object(o) => o.borrow().get_binding_value(name),
             EnvironmentRecord::Global(g) => g.borrow().get_binding_value(name),
+        }
+    }
+
+    pub fn set_mutable_binding(&self, name: Symbol, value: JSValue) {
+        match self {
+            EnvironmentRecord::Declarative(d) => d.borrow_mut().set_mutable_binding(name, value),
+            EnvironmentRecord::Object(o) => o.borrow_mut().set_mutable_binding(name, value),
+            EnvironmentRecord::Global(g) => g.borrow_mut().set_mutable_binding(name, value),
+        }
+    }
+
+    pub fn initialize_binding(&self, name: Symbol, value: JSValue) {
+        match self {
+            EnvironmentRecord::Declarative(d) => d.borrow_mut().initialize_binding(name, value),
+            EnvironmentRecord::Object(o) => o.borrow_mut().initialize_binding(name, value),
+            EnvironmentRecord::Global(g) => g.borrow_mut().initialize_binding(name, value),
         }
     }
 

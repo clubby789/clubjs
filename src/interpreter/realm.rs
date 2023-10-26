@@ -26,7 +26,7 @@ impl Debug for Realm {
 
 #[allow(non_snake_case)]
 pub struct RealmIntrinsics {
-    Object: ObjectIntrinsic,
+    pub Object: ObjectIntrinsic,
 }
 
 impl RealmIntrinsics {
@@ -37,7 +37,7 @@ impl RealmIntrinsics {
     }
 }
 
-struct ObjectIntrinsic {
+pub struct ObjectIntrinsic {
     pub prototype: Shared<JSObject>,
 }
 
@@ -122,6 +122,10 @@ impl Realm {
 
     pub fn script(&self) -> Rc<Script> {
         self.agent().current_context().script.clone()
+    }
+
+    pub fn intrinsics(&self) -> &RealmIntrinsics {
+        &self.intrinsics
     }
 }
 

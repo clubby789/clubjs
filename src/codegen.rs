@@ -11,7 +11,7 @@ use smallvec::SmallVec;
 use crate::{
     ast::{
         self, BinaryOperator, Block, Expression, ExpressionKind, MemberKey, Program, Scope,
-        Statement, StatementKind, VariableKind,
+        Statement, StatementKind, VariableDeclaration, VariableKind,
     },
     intern::Symbol,
     lex::{kw, Literal},
@@ -43,8 +43,12 @@ pub enum Opcode<TemporaryKind> {
     },
     /// Create an empty object in the accumulator
     CreateObject,
+    /// Store the value in the accumulator into the property reference
+    /// in [`obj`].
+    StoreProperty { obj: TemporaryKind },
     /// Store the value in the accumulator into the object in [`obj`],
-    /// at the property name held in [`name`]
+    /// at the property name held in [`name`]. Used for initializing
+    /// object literals.
     StoreNamedProperty { obj: TemporaryKind, name: NameIndex },
     /// Store the value in the accumulator into the object in [`obj`],
     /// at the property held in [`index`]
@@ -61,10 +65,19 @@ pub enum Opcode<TemporaryKind> {
         obj: TemporaryKind,
         index: TemporaryKind,
     },
+    /// Store the value in the accumulator at the variable held in [`name`]
+    StoreIdent { name: NameIndex },
+    /// Initialize the variable held in [`name`] with the value in the accumulator
+    InitializeIdent { name: NameIndex },
     /// Store the value in the accumulator into the given temporary
     StoreAcc(TemporaryKind),
     /// Load the value in the given temporary into acc
     LoadAcc(TemporaryKind),
+    /// Shallow copy the value in [`from`] to [`to`]
+    Move {
+        from: TemporaryKind,
+        to: TemporaryKind,
+    },
     /// Load the given integer into acc
     LoadInt(u128),
     /// Load the string at the nth index of this script/function's string table
@@ -303,7 +316,9 @@ impl FunctionBuilder {
                 body,
                 body_scope,
             } => todo!(),
-            StatementKind::VariableDeclaration(_) => todo!(),
+            StatementKind::VariableDeclaration(decl) => {
+                self.codegen_variable_declaration(decl);
+            }
             StatementKind::FunctionDeclaration(f) => {
                 let f = Self::codegen_function(f);
                 // TODO: handle functions at non top level as lexical declarations
@@ -331,6 +346,7 @@ impl FunctionBuilder {
                 for (name, node) in props.into_iter() {
                     if let Some(init) = node {
                         self.codegen_expression(init);
+                        let obj = self.copy(obj);
                         self.store_named_property(obj, name);
                     } else {
                         todo!()
@@ -420,6 +436,21 @@ impl FunctionBuilder {
         self.code.push(op);
     }
 
+    fn codegen_variable_declaration(&mut self, decl: Node<VariableDeclaration>) {
+        let decl = decl.take();
+        for declr in decl.declarations.into_iter() {
+            let declr = declr.take();
+            let binding_id = declr.name;
+            // TODO: anonymous functions
+            let name_idx = self.add_name(declr.name);
+            self.bound_names.insert(declr.name, decl.kind);
+            if let Some(init) = declr.init {
+                self.codegen_expression(init);
+                self.code.push(Opcode::InitializeIdent { name: name_idx })
+            }
+        }
+    }
+
     /// Store the contents of the accumulator into the object in [`obj`]
     /// with the property named [`name`]
     fn store_named_property(&mut self, obj: TemporaryIndex, name: Symbol) {
@@ -439,6 +470,16 @@ impl FunctionBuilder {
     /// Load the content of a temporary into the accumulator
     fn load_temporary(&mut self, temp: TemporaryIndex) {
         self.code.push(Opcode::LoadAcc(temp));
+    }
+
+    /// Shallow copy a register
+    fn copy(&mut self, temp: TemporaryIndex) -> TemporaryIndex {
+        let new = self.alloc_temporary();
+        self.code.push(Opcode::Move {
+            from: temp,
+            to: new,
+        });
+        new
     }
 
     /// Add a new name to this function's [`Self::names`] and return

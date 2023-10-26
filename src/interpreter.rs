@@ -165,6 +165,13 @@ impl VmState {
         self.regs[reg].set(self.acc.take());
     }
 
+    /// Copies from a register into another register
+    pub fn copy_reg_reg(&self, from: usize, to: usize) {
+        let content = self.regs[from].take();
+        self.regs[to].set(content.clone());
+        self.regs[from].set(content);
+    }
+
     pub fn set_acc(&self, value: JSValue) {
         self.acc.set(value);
     }
@@ -367,6 +374,9 @@ impl Agent {
             Opcode::LoadAcc(n) => {
                 ctx.state.mov_reg_acc(n);
             }
+            Opcode::Move { from, to } => {
+                ctx.state.copy_reg_reg(from, to);
+            }
             Opcode::Call0 => {
                 let target = ctx.state.acc.take();
                 drop(ctx);
@@ -374,7 +384,7 @@ impl Agent {
             }
             Opcode::Call1(arg) => {
                 let target = ctx.state.acc.take();
-                let arg = ctx.state.regs[arg].take();
+                let arg = ctx.state.regs[arg].take().get_value();
                 drop(ctx);
                 self.do_call(target, [arg]);
             }
@@ -387,9 +397,48 @@ impl Agent {
                     this_value: None,
                 }))
             }
+            Opcode::StoreNamedProperty { obj, name } => {
+                let base_val = ctx.state.regs[obj].take();
+                let name = ctx.get_name(name);
+                let value = ctx.state.acc.take();
+                let Some(obj) = base_val.as_object() else {
+                    unreachable!("StoreNamedProperty is used on objects only");
+                };
+                obj.borrow_mut().create_data_property_or_throw(name, value);
+            }
+            Opcode::InitializeIdent { name } => {
+                let name = ctx.get_name(name);
+                let value = ctx.state.acc.take();
+                let reference = ctx.resolve_binding(name, None);
+                let Either::Left(record) = reference.base else {
+                    unreachable!("Binding is resolved with no env");
+                };
+                record.initialize_binding(name, value);
+            }
+            Opcode::StoreIdent { name } => {
+                let name = ctx.get_name(name);
+                let value = ctx.state.acc.take();
+                let reference = ctx.resolve_binding(name, None);
+                JSValue::reference(reference).put_value(value);
+            }
+            Opcode::StoreProperty { obj } => {
+                let base_ref = ctx.state.regs[obj].take();
+                debug_assert!(
+                    base_ref.as_reference().is_some(),
+                    "StoreProperty takes a reference"
+                );
+                let value = ctx.state.acc.take();
+                base_ref.put_value(value);
+            }
             Opcode::Add(l, r) => {
                 let res = self.do_add(ctx.state.regs[l].take(), ctx.state.regs[r].take());
                 ctx.state.set_acc(res);
+            }
+            Opcode::CreateObject => {
+                let res = JSObject::ordinary_object(Some(
+                    self.realm.borrow().intrinsics().Object.prototype.clone(),
+                ));
+                ctx.state.set_acc(JSValue::object(Shared::new(res)));
             }
             o => todo!("{o:?} not implemented"),
         }
