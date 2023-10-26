@@ -310,8 +310,8 @@ impl FunctionBuilder {
     }
 
     /// Evaluate the given expression, storing the result in the accumulator
-    fn codegen_expression(&mut self, stmt: Node<Expression>) {
-        match stmt.take().kind {
+    fn codegen_expression(&mut self, expr: Node<Expression>) {
+        match expr.take().kind {
             ExpressionKind::This => self.code.push(Opcode::LoadThis),
             ExpressionKind::Array(exprs) => {
                 self.code.push(Opcode::CreateArray);
@@ -350,14 +350,10 @@ impl FunctionBuilder {
             ExpressionKind::New(_) => todo!(),
             ExpressionKind::Delete(_) => todo!(),
             ExpressionKind::Call(target, args) => {
-                self.codegen_expression(*target);
-                let func = self.store_temporary();
+                let func = self.codegen_expression_to_temporary(*target);
                 let args: Vec<_> = args
                     .into_iter()
-                    .map(|expr| {
-                        self.codegen_expression(expr);
-                        self.store_temporary()
-                    })
+                    .map(|expr| self.codegen_expression_to_temporary(expr))
                     .collect();
                 self.load_temporary(func);
                 match args.as_slice() {
@@ -367,8 +363,7 @@ impl FunctionBuilder {
                 }
             }
             ExpressionKind::Member(base, key) => {
-                self.codegen_expression(*base);
-                let base = self.store_temporary();
+                let base = self.codegen_expression_to_temporary(*base);
                 match key {
                     MemberKey::Static(name) => {
                         let name = self.add_name(name);
@@ -391,6 +386,13 @@ impl FunctionBuilder {
                 self.code.push(Opcode::LoadIdent(name))
             }
         }
+    }
+
+    /// Evaluate the given expression, storing the result in the accumulator
+    /// then moving it to a new temporary. Returns the index of the new temporary used
+    fn codegen_expression_to_temporary(&mut self, expr: Node<Expression>) -> TemporaryIndex {
+        self.codegen_expression(expr);
+        self.store_temporary()
     }
 
     fn codegen_literal(&mut self, lit: Literal) {
