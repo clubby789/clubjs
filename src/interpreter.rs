@@ -129,12 +129,29 @@ impl ExecutionContext {
         }
     }
 
+    // Load a fuction from this context's anon function table
+    pub fn get_func(&self, index: codegen::NameIndex) -> Rc<codegen::Function> {
+        if let Some(f) = self.function.as_function() {
+            f.code().anon_functions()[index].clone()
+        } else {
+            self.script.anon_functions()[index].clone()
+        }
+    }
+
     pub fn get_op(&self, index: usize) -> Option<Opcode<codegen::TemporaryIndex>> {
         if let Some(f) = self.function.as_function() {
             f.code().opcodes().get(index).copied()
         } else {
             self.script.opcodes().get(index).copied()
         }
+    }
+
+    pub fn get_this_environment(&self) -> EnvironmentRecord {
+        let mut env = self.lexical_environment.clone();
+        while !env.has_this_binding() {
+            env = env.outer_env().expect("9.4.3.2.d");
+        }
+        env
     }
 }
 
@@ -208,6 +225,10 @@ impl ReferenceRecord {
                     .expect_right("callee ensures this is okay")
             })
             .clone()
+    }
+
+    pub fn is_property_reference(&self) -> bool {
+        self.base.is_right()
     }
 }
 
@@ -362,6 +383,10 @@ impl Agent {
                 let reference = ctx.resolve_binding(name, None);
                 ctx.state.set_acc(JSValue::reference(reference));
             }
+            Opcode::LoadThis => {
+                let rec = ctx.get_this_environment();
+                ctx.state.set_acc(rec.get_this_binding());
+            }
             Opcode::StoreAcc(n) => {
                 ctx.state.mov_acc_reg(n);
             }
@@ -370,6 +395,21 @@ impl Agent {
             }
             Opcode::LoadString(s) => {
                 ctx.state.set_acc(JSValue::string(ctx.get_string(s)));
+            }
+            Opcode::LoadFunc(f) => {
+                let func = ctx.get_func(f);
+                let env = ctx.lexical_environment.clone();
+                // TODO: %Function.prototype%
+                let param_list = func.params().map(|p| p.name()).collect();
+                let closure = JSObject::ordinary_function_object(
+                    None,
+                    param_list,
+                    func,
+                    ThisMode::NonLexical,
+                    env,
+                    ctx.realm.clone(),
+                );
+                ctx.state.acc.set(JSValue::object(Shared::new(closure)))
             }
             Opcode::LoadAcc(n) => {
                 ctx.state.mov_reg_acc(n);
@@ -446,9 +486,19 @@ impl Agent {
     }
 
     fn do_call<const N: usize>(&self, target: JSValue, args: [JSValue; N]) {
-        let this_value = if target.as_reference().is_some() {
-            // TODO: property reference
-            JSValue::undefined()
+        let this_value = if let Some(reference) = target.as_reference() {
+            if reference.is_property_reference() {
+                reference.get_this_value()
+            } else {
+                let ref_env = reference
+                    .base
+                    .as_ref()
+                    .expect_left("checked above that this is not a property");
+                ref_env
+                    .with_base_object()
+                    .map(JSValue::object)
+                    .unwrap_or(JSValue::undefined())
+            }
         } else {
             JSValue::undefined()
         };

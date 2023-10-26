@@ -40,10 +40,18 @@ impl JSValue {
         }
     }
 
+    pub fn is_undefined(&self) -> bool {
+        matches!(self.kind, JSValueKind::Undefined)
+    }
+
     pub const fn null() -> Self {
         Self {
             kind: JSValueKind::Null,
         }
+    }
+
+    pub fn is_null(&self) -> bool {
+        matches!(self.kind, JSValueKind::Null)
     }
 
     pub fn int(n: u128) -> Self {
@@ -148,10 +156,10 @@ impl JSValue {
     }
 
     pub fn to_object(self) -> Shared<JSObject> {
-        if let JSValueKind::Object(o) = self.kind {
-            o
-        } else {
-            todo!("other ToObject conversions")
+        match self.kind {
+            JSValueKind::Object(o) => o,
+            JSValueKind::Reference(_) => self.get_value().to_object(),
+            _ => todo!("other ToObject conversions: {self:?}"),
         }
     }
 
@@ -464,6 +472,15 @@ impl JSObject {
         self.object.callable()
     }
 
+    /// Asserting that this is a function, retrieve the [`ThisMode`]
+    pub fn this_mode(&self) -> ThisMode {
+        match &self.object {
+            Object::Function(f) => f.this_mode,
+            Object::BuiltinFunction(_) => todo!("builtin thismode"),
+            _ => panic!("not a function"),
+        }
+    }
+
     pub fn environment_record(&self) -> EnvironmentRecord {
         let Object::Function(f) = &self.object else {
             todo!("blah blah")
@@ -577,21 +594,38 @@ impl Function {
         &self,
         script: Rc<Script>,
         function_obj: JSValue,
-        _this: JSValue,
+        this: JSValue,
         args: Vec<JSValue>,
     ) {
-        // TODO: properly set up environment records
+        // PrepareForOrdinaryCall
         let realm = self.realm.clone();
-        let local_env =
-            EnvironmentRecord::new_function_environment(function_obj.as_object().unwrap().clone());
+        let function_obj = function_obj.as_object().unwrap();
+        let local_env = EnvironmentRecord::new_function_environment(function_obj.clone());
 
         let callee_context = ExecutionContext::from_realm_and_function(
-            realm,
-            function_obj,
+            realm.clone(),
+            JSValue::object(function_obj.clone()),
             local_env.clone(),
-            EnvironmentRecord::default(),
+            local_env.clone(),
             script,
         );
+        // OrdinaryCallBindThis
+        let this_mode = function_obj.borrow().this_mode();
+        if this_mode != ThisMode::Lexical {
+            let callee_realm = realm;
+            let this_value = if this.is_null() || this.is_undefined() {
+                callee_realm
+                    .borrow()
+                    .global_env
+                    .borrow()
+                    .global_this()
+                    .clone()
+            } else {
+                this.to_object()
+            };
+            local_env.bind_this_value(JSValue::object(this_value));
+        }
+
         self.realm.borrow().push_execution_context(callee_context);
         assert_eq!(
             args.len(),
@@ -605,9 +639,10 @@ impl Function {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThisMode {
     Lexical,
+    NonLexical,
     // Strict,
     Global,
 }

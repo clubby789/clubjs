@@ -82,6 +82,8 @@ pub enum Opcode<TemporaryKind> {
     LoadInt(u128),
     /// Load the string at the nth index of this script/function's string table
     LoadString(StringIndex),
+    /// Load the function at the nth index of this script/function's anon function table
+    LoadFunc(AnonFunctionIndex),
     /// Call the function in the accumulator with no args
     Call0,
     /// Call the function in the accumulator with the arg in the given temporary
@@ -97,11 +99,13 @@ pub enum Opcode<TemporaryKind> {
 pub type TemporaryIndex = usize;
 pub type NameIndex = usize;
 pub type StringIndex = usize;
+pub type AnonFunctionIndex = usize;
 
 #[derive(Debug, Default)]
 pub struct Script {
     code: Vec<Opcode<TemporaryIndex>>,
     variable_declarations: HashMap<Symbol, VariableKind>,
+    anon_functions: Vec<Rc<Function>>,
     functions: HashMap<Symbol, Rc<Function>>,
     names: IndexSet<Symbol>,
     strings: IndexSet<Symbol>,
@@ -118,6 +122,10 @@ impl Script {
 
     pub fn strings(&self) -> &Slice<Symbol> {
         self.strings.as_slice()
+    }
+
+    pub fn anon_functions(&self) -> &[Rc<Function>] {
+        self.anon_functions.as_ref()
     }
 }
 
@@ -139,6 +147,7 @@ pub struct Function {
     code: Vec<Opcode<TemporaryIndex>>,
     variable_declarations: HashMap<Symbol, VariableKind>,
     functions: HashMap<Symbol, Rc<Function>>,
+    anon_functions: Vec<Rc<Function>>,
     names: IndexSet<Symbol>,
     name: Symbol,
 
@@ -162,6 +171,10 @@ impl Function {
 
     pub fn strings(&self) -> &Slice<Symbol> {
         self.strings.as_slice()
+    }
+
+    pub fn anon_functions(&self) -> &[Rc<Function>] {
+        self.anon_functions.as_ref()
     }
 }
 
@@ -212,6 +225,7 @@ pub enum Declaration {
 #[derive(Default)]
 pub struct FunctionBuilder {
     code: Vec<Opcode<TemporaryIndex>>,
+    anon_functions: Vec<Rc<Function>>,
     functions: HashMap<Symbol, Rc<Function>>,
     /// Holds the next temporary index to use,
     /// incrementing every time we allocate a new one
@@ -233,6 +247,7 @@ impl FunctionBuilder {
         }
         Script {
             code: f.code,
+            anon_functions: f.anon_functions,
             functions: f.functions,
             names: f.names,
             variable_declarations: f.bound_names,
@@ -257,6 +272,7 @@ impl FunctionBuilder {
         }
         Function {
             code: f.code,
+            anon_functions: f.anon_functions,
             functions: f.functions,
             names: f.names,
             variable_declarations: f.bound_names,
@@ -354,7 +370,12 @@ impl FunctionBuilder {
                 }
                 self.load_temporary(obj)
             }
-            ExpressionKind::Function(_) => todo!(),
+            ExpressionKind::Function(func) => {
+                let f = Self::codegen_function(func);
+                let idx = self.anon_functions.len();
+                self.anon_functions.push(Rc::new(f));
+                self.code.push(Opcode::LoadFunc(idx));
+            }
             ExpressionKind::Arrow(_) => todo!(),
             ExpressionKind::Unary(_, _) => todo!(),
             ExpressionKind::Binary(l, op, r) => self.codegen_binary(*l, op, *r),
