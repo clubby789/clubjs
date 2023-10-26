@@ -32,16 +32,15 @@ impl Display for JSValue {
     }
 }
 
-
 #[allow(clippy::wrong_self_convention)] // We use ES6's naming scheme
 impl JSValue {
-    pub fn undefined() -> Self {
+    pub const fn undefined() -> Self {
         Self {
             kind: JSValueKind::Undefined,
         }
     }
 
-    pub fn null() -> Self {
+    pub const fn null() -> Self {
         Self {
             kind: JSValueKind::Null,
         }

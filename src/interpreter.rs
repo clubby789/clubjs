@@ -172,10 +172,13 @@ impl VmState {
 
 impl Default for VmState {
     fn default() -> Self {
+        // Benchmark shows that std::array::from_fn is slow so make a const
+        // value
+        const NULL: Cell<JSValue> = Cell::new(JSValue::null());
         Self {
             pc: Default::default(),
-            acc: Cell::new(JSValue::null()),
-            regs: std::array::from_fn(|_| Cell::new(JSValue::null())),
+            acc: NULL,
+            regs: [NULL; 255],
         }
     }
 }
