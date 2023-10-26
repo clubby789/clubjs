@@ -17,8 +17,6 @@ use std::{
 };
 use value::{JSObject, JSValue, PropertyDescriptor};
 
-use self::value::AdditionalSlots;
-
 mod environment_record;
 mod realm;
 mod value;
@@ -116,11 +114,7 @@ impl ExecutionContext {
 
     // TODO: make this a ref
     pub fn strings(&self) -> IndexSet<Symbol> {
-        if let Some(obj) = self.function.to_object() {
-            let obj = obj.borrow();
-            let AdditionalSlots::Function(f) = obj.extra_slots() else {
-                unreachable!()
-            };
+        if let Some(f) = self.function.as_function() {
             f.code().strings()
         } else {
             self.script.strings()
@@ -331,11 +325,7 @@ impl Agent {
 
     fn step(&self) -> bool {
         let ctx = self.current_context();
-        let (op, names) = if let Some(obj) = ctx.function.to_object() {
-            let obj = obj.borrow();
-            let AdditionalSlots::Function(f) = obj.extra_slots() else {
-                unreachable!()
-            };
+        let (op, names) = if let Some(f) = ctx.function.as_function() {
             let Some(&op) = f.code().opcodes().get(ctx.state.pc.get()) else {
                 return false;
             };
@@ -392,14 +382,14 @@ impl Agent {
     }
 
     fn do_call<const N: usize>(&self, target: JSValue, args: [JSValue; N]) {
-        let this_value = if target.to_reference().is_some() {
+        let this_value = if target.as_reference().is_some() {
             // TODO: property reference
             JSValue::undefined()
         } else {
             JSValue::undefined()
         };
         let target = target.get_value();
-        let Some(func) = target.to_object() else {
+        let Some(func) = target.as_object() else {
             panic!("TypeError: call target is not an object")
         };
         if !func.borrow().callable() {

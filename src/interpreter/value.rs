@@ -7,7 +7,7 @@ use std::{
 use either::Either;
 
 use crate::{
-    codegen::{Function, Script},
+    codegen::{self, Script},
     intern::Symbol,
     lex::kw,
 };
@@ -62,11 +62,21 @@ impl JSValue {
         }
     }
 
-    pub fn to_object(&self) -> Option<Shared<JSObject>> {
+    pub fn as_object(&self) -> Option<Shared<JSObject>> {
         if let JSValueKind::Object(o) = &self.kind {
             Some(o.clone())
         } else {
-            // TODO: Implement ToObject properly
+            None
+        }
+    }
+
+    pub fn as_function(&self) -> Option<Function> {
+        let JSValueKind::Object(o) = &self.kind else {
+            return None;
+        };
+        if let Object::Function(f) = &o.borrow().object {
+            Some(f.clone())
+        } else {
             None
         }
     }
@@ -77,7 +87,7 @@ impl JSValue {
         }
     }
 
-    pub fn to_reference(&self) -> Option<&ReferenceRecord> {
+    pub fn as_reference(&self) -> Option<&ReferenceRecord> {
         if let JSValueKind::Reference(r) = &self.kind {
             Some(r)
         } else {
@@ -86,7 +96,7 @@ impl JSValue {
     }
 
     pub fn get_value(&self) -> Self {
-        let Some(r) = self.to_reference() else {
+        let Some(r) = self.as_reference() else {
             return self.clone();
         };
 
@@ -95,7 +105,7 @@ impl JSValue {
             Either::Right(val) => {
                 let object = val
                     .get_value()
-                    .to_object()
+                    .as_object()
                     .unwrap_or_else(|| panic!("TypeError: {val} is not an object"));
                 let object = object.borrow();
                 object.ordinary_get(r.referenced_name, r.get_this_value())
@@ -189,7 +199,7 @@ pub struct JSObject {
     prototype: Option<Shared<JSObject>>,
     extensible: bool,
     properties: HashMap<Symbol, PropertyDescriptor>,
-    extra_slots: AdditionalSlots,
+    object: Object,
 }
 
 impl JSObject {
@@ -278,22 +288,22 @@ impl JSObject {
             prototype,
             extensible: true,
             properties: HashMap::new(),
-            extra_slots: AdditionalSlots::None,
+            object: Object::Ordinary,
         }
     }
 
     pub fn ordinary_function_object(
         prototype: Option<Shared<JSObject>>,
         param_list: Vec<Symbol>,
-        body: Rc<Function>,
+        body: Rc<codegen::Function>,
         // TODO: check this is handled right (OrdinaryFunctionCreate)
         this_mode: ThisMode,
         env: EnvironmentRecord,
         realm: Shared<Realm>,
     ) -> Self {
         let mut f = Self::ordinary_object(prototype);
-        let slots = FunctionSlots::new(env, param_list, body, realm, this_mode);
-        f.extra_slots = AdditionalSlots::Function(slots);
+        let function = Function::new(env, param_list, body, realm, this_mode);
+        f.object = Object::Function(function);
         f
     }
 
@@ -304,12 +314,12 @@ impl JSObject {
         name: Symbol,
         realm: Shared<Realm>,
     ) -> Self {
-        let slots = BuiltinFunctionSlots::new(realm, name, behaviour);
+        let function = BuiltinFunction::new(realm, name, behaviour);
         JSObject {
             prototype: None,
             extensible: true,
             properties: HashMap::new(),
-            extra_slots: AdditionalSlots::BuiltinFunction(slots),
+            object: Object::BuiltinFunction(function),
         }
     }
 
@@ -318,18 +328,11 @@ impl JSObject {
     }
 
     pub fn callable(&self) -> bool {
-        matches!(
-            self.extra_slots,
-            AdditionalSlots::BuiltinFunction(_) | AdditionalSlots::Function(_)
-        )
-    }
-
-    pub fn extra_slots(&self) -> &AdditionalSlots {
-        &self.extra_slots
+        self.object.callable()
     }
 
     pub fn environment_record(&self) -> EnvironmentRecord {
-        let AdditionalSlots::Function(f) = &self.extra_slots else {
+        let Object::Function(f) = &self.object else {
             todo!("blah blah")
         };
         f.environment.clone()
@@ -339,13 +342,13 @@ impl JSObject {
 impl Shared<JSObject> {
     pub fn call(&self, script: Rc<Script>, this: JSValue, args: Vec<JSValue>) {
         let borrowed = self.borrow();
-        match borrowed.extra_slots.clone() {
-            AdditionalSlots::BuiltinFunction(b) => {
+        match borrowed.object.clone() {
+            Object::BuiltinFunction(b) => {
                 drop(borrowed);
                 // TODO: return this again
                 b.call(script, JSValue::object(self.clone()), this, args);
             }
-            AdditionalSlots::Function(f) => {
+            Object::Function(f) => {
                 f.call(script, JSValue::object(self.clone()), this, args);
             }
             _ => unreachable!("callers should check this is callable"),
@@ -353,25 +356,30 @@ impl Shared<JSObject> {
     }
 }
 
-/// Hold additional slots for an ordinary object
 #[derive(Default, Debug, Clone)]
-pub enum AdditionalSlots {
+pub enum Object {
     #[default]
-    None,
-    BuiltinFunction(BuiltinFunctionSlots),
-    Function(FunctionSlots),
+    Ordinary,
+    Function(Function),
+    BuiltinFunction(BuiltinFunction),
+}
+
+impl Object {
+    pub fn callable(&self) -> bool {
+        matches!(self, Object::Function(_) | Object::BuiltinFunction(_))
+    }
 }
 
 pub type BuiltinFunctionPointer = fn(Shared<Realm>, JSValue, Vec<JSValue>) -> JSValue;
 
 #[derive(Debug, Clone)]
-pub struct BuiltinFunctionSlots {
+pub struct BuiltinFunction {
     realm: Shared<Realm>,
     initial_name: Symbol,
     func: BuiltinFunctionPointer,
 }
 
-impl BuiltinFunctionSlots {
+impl BuiltinFunction {
     pub fn new(realm: Shared<Realm>, initial_name: Symbol, func: BuiltinFunctionPointer) -> Self {
         Self {
             realm,
@@ -403,28 +411,28 @@ impl BuiltinFunctionSlots {
 }
 
 #[derive(Debug, Clone)]
-pub struct FunctionSlots {
+pub struct Function {
     environment: EnvironmentRecord,
     // private_environment: Option<Shared<PrivateEnvironmentRecord>>,
-    formal_paramaters: Vec<Symbol>,
-    ecma_script_code: Rc<Function>,
+    formal_paramaters: Rc<Vec<Symbol>>,
+    ecma_script_code: Rc<codegen::Function>,
     realm: Shared<Realm>,
     this_mode: ThisMode,
     // strict: bool,
     home_object: Option<Shared<JSObject>>,
 }
 
-impl FunctionSlots {
+impl Function {
     pub fn new(
         env: EnvironmentRecord,
         formal_paramaters: Vec<Symbol>,
-        ecma_script_code: Rc<Function>,
+        ecma_script_code: Rc<codegen::Function>,
         realm: Shared<Realm>,
         this_mode: ThisMode,
     ) -> Self {
         Self {
             environment: env,
-            formal_paramaters,
+            formal_paramaters: Rc::new(formal_paramaters),
             ecma_script_code,
             realm,
             this_mode,
@@ -442,7 +450,7 @@ impl FunctionSlots {
         // TODO: properly set up environment records
         let realm = self.realm.clone();
         let local_env =
-            EnvironmentRecord::new_function_environment(function_obj.to_object().unwrap().clone());
+            EnvironmentRecord::new_function_environment(function_obj.as_object().unwrap().clone());
 
         let callee_context = ExecutionContext::from_realm_and_function(
             realm,
@@ -459,7 +467,7 @@ impl FunctionSlots {
         );
     }
 
-    pub fn code(&self) -> &Function {
+    pub fn code(&self) -> &codegen::Function {
         self.ecma_script_code.as_ref()
     }
 }
