@@ -477,7 +477,7 @@ pub struct PropertyDescriptor {
     writable: bool,
     // get: (),
     // set: (),
-    enumerable: bool,
+    _enumerable: bool,
     configurable: bool,
 }
 
@@ -488,13 +488,9 @@ impl PropertyDescriptor {
         Self {
             value,
             writable: false,
-            enumerable: false,
+            _enumerable: false,
             configurable: false,
         }
-    }
-
-    pub fn value(self, value: JSValue) -> Self {
-        Self { value, ..self }
     }
 
     pub fn writable(self, writable: bool) -> Self {
@@ -502,7 +498,10 @@ impl PropertyDescriptor {
     }
 
     pub fn enumerable(self, enumerable: bool) -> Self {
-        Self { enumerable, ..self }
+        Self {
+            _enumerable: enumerable,
+            ..self
+        }
     }
 
     pub fn configurable(self, configurable: bool) -> Self {

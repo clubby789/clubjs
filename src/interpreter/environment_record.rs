@@ -188,14 +188,6 @@ impl EnvironmentRecord {
         }
     }
 
-    pub fn set_outer_env(&self, env: Option<EnvironmentRecord>) {
-        match self {
-            EnvironmentRecord::Declarative(d) => d.borrow_mut().outer_env = env,
-            EnvironmentRecord::Object(o) => o.borrow_mut().outer_env = env,
-            EnvironmentRecord::Global(_) => panic!("can't set outer env of a global"),
-        }
-    }
-
     pub fn has_binding(&self, name: Symbol) -> bool {
         match self {
             EnvironmentRecord::Declarative(d) => d.borrow().has_binding(name),
