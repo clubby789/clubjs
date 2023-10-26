@@ -92,18 +92,16 @@ pub struct Script {
 }
 
 impl Script {
-    pub fn code(&self) -> &[Opcode<usize>] {
+    pub fn opcodes(&self) -> &[Opcode<usize>] {
         self.code.as_ref()
     }
 
-    // TODO: make this a ref
-    pub fn names(&self) -> IndexSet<Symbol> {
-        self.names.clone()
+    pub fn names(&self) -> &Slice<Symbol> {
+        self.names.as_slice()
     }
 
-    // TODO: make this a ref
-    pub fn strings(&self) -> IndexSet<Symbol> {
-        self.strings.clone()
+    pub fn strings(&self) -> &Slice<Symbol> {
+        self.strings.as_slice()
     }
 }
 
@@ -138,17 +136,16 @@ impl Function {
         self.param_list.iter()
     }
 
-    // TODO: make this a ref
-    pub fn names(&self) -> IndexSet<Symbol> {
-        self.names.clone()
+    pub fn names(&self) -> &Slice<Symbol> {
+        self.names.as_slice()
     }
 
     pub fn opcodes(&self) -> &[Opcode<usize>] {
         self.code.as_ref()
     }
 
-    pub fn strings(&self) -> IndexSet<Symbol> {
-        self.strings.clone()
+    pub fn strings(&self) -> &Slice<Symbol> {
+        self.strings.as_slice()
     }
 }
 

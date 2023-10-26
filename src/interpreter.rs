@@ -6,7 +6,6 @@ use crate::{
 };
 use either::Either;
 use environment_record::{EnvironmentRecord, GlobalEnvironmentRecord};
-use indexmap::IndexSet;
 use realm::Realm;
 use std::{
     cell::{Cell, Ref, RefCell, RefMut},
@@ -112,12 +111,29 @@ impl ExecutionContext {
         panic!("could not resolve binding `{name}`");
     }
 
-    // TODO: make this a ref
-    pub fn strings(&self) -> IndexSet<Symbol> {
+    // Load a string from this context's string table
+    pub fn get_string(&self, index: codegen::StringIndex) -> Symbol {
         if let Some(f) = self.function.as_function() {
-            f.code().strings()
+            f.code().strings()[index]
         } else {
-            self.script.strings()
+            self.script.strings()[index]
+        }
+    }
+
+    // Load a name from this context's name table
+    pub fn get_name(&self, index: codegen::NameIndex) -> Symbol {
+        if let Some(f) = self.function.as_function() {
+            f.code().names()[index]
+        } else {
+            self.script.names()[index]
+        }
+    }
+
+    pub fn get_op(&self, index: usize) -> Option<Opcode<codegen::TemporaryIndex>> {
+        if let Some(f) = self.function.as_function() {
+            f.code().opcodes().get(index).copied()
+        } else {
+            self.script.opcodes().get(index).copied()
         }
     }
 }
@@ -325,22 +341,14 @@ impl Agent {
 
     fn step(&self) -> bool {
         let ctx = self.current_context();
-        let (op, names) = if let Some(f) = ctx.function.as_function() {
-            let Some(&op) = f.code().opcodes().get(ctx.state.pc.get()) else {
-                return false;
-            };
-            ctx.state.inc_pc();
-            (op, f.code().names())
-        } else {
-            let Some(&op) = ctx.script.code().get(ctx.state.pc.get()) else {
-                return false;
-            };
-            ctx.state.inc_pc();
-            (op, ctx.script.names())
+        let Some(op) = ctx.get_op(ctx.state.pc.get()) else {
+            return false;
         };
+        ctx.state.inc_pc();
+
         match op {
             Opcode::LoadIdent(n) => {
-                let name = names[n];
+                let name = ctx.get_name(n);
                 let reference = ctx.resolve_binding(name, None);
                 ctx.state.set_acc(JSValue::reference(reference));
             }
@@ -351,7 +359,7 @@ impl Agent {
                 ctx.state.set_acc(JSValue::int(n));
             }
             Opcode::LoadString(s) => {
-                ctx.state.set_acc(JSValue::string(ctx.strings()[s]));
+                ctx.state.set_acc(JSValue::string(ctx.get_string(s)));
             }
             Opcode::LoadAcc(n) => {
                 ctx.state.mov_reg_acc(n);
@@ -369,7 +377,7 @@ impl Agent {
             }
             Opcode::GetNamedProperty { obj, name } => {
                 let base_value = ctx.state.regs[obj].take();
-                let name = names[name];
+                let name = ctx.get_name(name);
                 ctx.state.set_acc(JSValue::reference(ReferenceRecord {
                     base: Either::Right(base_value),
                     referenced_name: name,

@@ -1,4 +1,5 @@
 use std::{
+    cell::Ref,
     collections::{hash_map::Entry, HashMap},
     fmt::{Debug, Display},
     rc::Rc,
@@ -70,15 +71,19 @@ impl JSValue {
         }
     }
 
-    pub fn as_function(&self) -> Option<Function> {
+    pub fn as_function(&self) -> Option<Ref<'_, Function>> {
         let JSValueKind::Object(o) = &self.kind else {
             return None;
         };
-        if let Object::Function(f) = &o.borrow().object {
-            Some(f.clone())
-        } else {
-            None
-        }
+        let borrow = o.borrow();
+        Ref::filter_map(borrow, |o| {
+            if let Object::Function(f) = &o.object {
+                Some(f)
+            } else {
+                None
+            }
+        })
+        .ok()
     }
 
     pub fn reference(r: ReferenceRecord) -> Self {
