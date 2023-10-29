@@ -241,7 +241,7 @@ impl ReferenceRecord {
 }
 
 pub struct Agent {
-    realm: Shared<Realm>,
+    realm: RefCell<Shared<Realm>>,
     contexts: RefCell<Vec<ExecutionContext>>,
 }
 
@@ -262,7 +262,7 @@ impl Agent {
             Rc::new(Script::default()),
         );
         let agent = Rc::new(Self {
-            realm: realm.clone(),
+            realm: RefCell::new(realm.clone()),
             contexts: RefCell::new(vec![outer_ctx]),
         });
         realm.set_global_object(None, None);
@@ -270,6 +270,23 @@ impl Agent {
         realm.set_agent(Rc::downgrade(&agent));
         realm.set_custom_global_bindings();
         agent
+    }
+
+    /// Reset the state of the agent by creating a new [`Realm`]
+    pub fn reset(self: &Rc<Self>) {
+        let realm = Shared::new(Realm::new());
+        let outer_ctx = ExecutionContext::from_realm(
+            realm.clone(),
+            EnvironmentRecord::default(),
+            EnvironmentRecord::default(),
+            Rc::new(Script::default()),
+        );
+        realm.set_global_object(None, None);
+        realm.set_default_global_bindings();
+        realm.set_agent(Rc::downgrade(&self));
+        realm.set_custom_global_bindings();
+        *self.realm.borrow_mut() = realm;
+        *self.contexts.borrow_mut() = vec![outer_ctx];
     }
 
     fn current_context(&self) -> Ref<'_, ExecutionContext> {
@@ -310,13 +327,13 @@ impl Agent {
     }
 
     pub fn script_evaluation(&self, script: ScriptRecord) {
-        let env = self.realm.global_env.borrow();
+        let env = self.realm.borrow().global_env.borrow().clone();
         let code = codegen::FunctionBuilder::codegen_script(script.ecma_script_code);
-        Self::global_declaration_instantiation(&code, env.clone(), self.realm.clone());
+        Self::global_declaration_instantiation(&code, env.clone(), self.realm.borrow().clone());
 
         let global_env = EnvironmentRecord::Global(env.clone());
         let script_context = ExecutionContext::from_realm(
-            self.realm.clone(),
+            self.realm.borrow().clone(),
             global_env.clone(),
             global_env.clone(),
             Rc::new(code),
@@ -507,7 +524,7 @@ impl Agent {
             }
             Opcode::CreateObject => {
                 let res = JSObject::ordinary_object(Some(
-                    self.realm.intrinsics().Object.prototype.clone(),
+                    self.realm.borrow().intrinsics().Object.prototype.clone(),
                 ));
                 ctx.state.set_acc(JSValue::object(Shared::new(res)));
             }
@@ -518,7 +535,7 @@ impl Agent {
                     JSValue::undefined()
                 };
                 drop(ctx);
-                self.realm.pop_execution_context();
+                self.realm.borrow().pop_execution_context();
                 self.current_context().state.acc.set(return_value);
             }
             Opcode::CreatePerIterationEnvironment => {
