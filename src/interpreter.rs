@@ -445,11 +445,35 @@ impl Agent {
                     this_value: None,
                 }))
             }
+            Opcode::GetComputedProperty { obj, index } => {
+                let base_value = ctx.state.regs[obj].take();
+                let prop_name_value = ctx.state.regs[index].take().get_value();
+                let prop_key = prop_name_value.to_primitive(/*TODO: prefer STRING*/);
+                // TODO: handle symbol
+                let name = prop_key.to_string();
+                ctx.state.set_acc(JSValue::reference(ReferenceRecord {
+                    base: Either::Right(base_value),
+                    referenced_name: name,
+                    this_value: None,
+                }))
+            }
             Opcode::StoreNamedProperty { obj, name } => {
-                let base_val = ctx.state.regs[obj].take();
+                let base_value = ctx.state.regs[obj].take();
                 let name = ctx.get_name(name);
                 let value = ctx.state.acc.take();
-                let Some(obj) = base_val.as_object() else {
+                let Some(obj) = base_value.as_object() else {
+                    unreachable!("StoreNamedProperty is used on objects only");
+                };
+                obj.borrow_mut().create_data_property_or_throw(name, value);
+            }
+            Opcode::StoreComputedProperty { obj, index } => {
+                let base_value = ctx.state.regs[obj].take();
+                let prop_name_value = ctx.state.regs[index].take().get_value();
+                let value = ctx.state.acc.take();
+                let prop_key = prop_name_value.to_primitive(/*TODO: prefer STRING*/);
+                // TODO: handle symbol
+                let name = prop_key.to_string();
+                let Some(obj) = base_value.as_object() else {
                     unreachable!("StoreNamedProperty is used on objects only");
                 };
                 obj.borrow_mut().create_data_property_or_throw(name, value);

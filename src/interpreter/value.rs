@@ -186,6 +186,13 @@ impl JSValue {
         }
     }
 
+    pub fn to_string(self) -> Symbol {
+        match self {
+            JSValue::String(s) => s,
+            _ => todo!("ToString"),
+        }
+    }
+
     /// Adds together two [`JSValue::Number`]s or [`JSValue::BigInt`]s
     pub fn add(self, other: Self) -> Self {
         debug_assert!(self.same_type(&other));
