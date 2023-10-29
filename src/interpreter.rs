@@ -8,7 +8,7 @@ use either::Either;
 use environment_record::{EnvironmentRecord, GlobalEnvironmentRecord};
 use realm::Realm;
 use std::{
-    cell::{Cell, Ref, RefCell, RefMut},
+    cell::{Cell, Ref, RefCell},
     collections::HashSet,
     ops::Deref,
     path::PathBuf,
@@ -24,7 +24,7 @@ mod value;
 
 // TODO: make this gc?
 #[derive(Default)]
-pub struct Shared<T>(Rc<RefCell<T>>);
+pub struct Shared<T>(Rc<T>);
 
 impl<T: std::fmt::Debug> std::fmt::Debug for Shared<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -40,22 +40,12 @@ impl<T> Clone for Shared<T> {
 
 impl<T> Shared<T> {
     pub fn new(value: T) -> Self {
-        Self(Rc::new(RefCell::new(value)))
-    }
-
-    #[track_caller]
-    pub fn borrow(&self) -> Ref<'_, T> {
-        self.0.borrow()
-    }
-
-    #[track_caller]
-    pub fn borrow_mut(&self) -> RefMut<'_, T> {
-        self.0.borrow_mut()
+        Self(Rc::new(value))
     }
 }
 
 impl<T> Deref for Shared<T> {
-    type Target = Rc<RefCell<T>>;
+    type Target = Rc<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -267,11 +257,9 @@ impl Agent {
             realm: realm.clone(),
             contexts: RefCell::new(vec![outer_ctx]),
         });
-        let mut r = realm.borrow_mut();
-        r.set_global_object(None, None);
-        r.set_default_global_bindings();
-        r.set_agent(Rc::downgrade(&agent));
-        drop(r);
+        realm.set_global_object(None, None);
+        realm.set_default_global_bindings();
+        realm.set_agent(Rc::downgrade(&agent));
         realm.set_custom_global_bindings();
         agent
     }
@@ -307,11 +295,11 @@ impl Agent {
     }
 
     pub fn script_evaluation(&self, script: ScriptRecord) {
-        let env = self.realm.borrow().global_env.clone();
+        let env = self.realm.global_env.borrow();
         let code = codegen::FunctionBuilder::codegen_script(script.ecma_script_code);
         Self::global_declaration_instantiation(&code, env.clone(), self.realm.clone());
 
-        let global_env = EnvironmentRecord::Global(env);
+        let global_env = EnvironmentRecord::Global(env.clone());
         let script_context = ExecutionContext::from_realm(
             self.realm.clone(),
             global_env.clone(),
@@ -465,7 +453,7 @@ impl Agent {
                 let Some(obj) = base_value.as_object() else {
                     unreachable!("StoreNamedProperty is used on objects only");
                 };
-                obj.borrow_mut().create_data_property_or_throw(name, value);
+                obj.create_data_property_or_throw(name, value);
             }
             Opcode::StoreComputedProperty { obj, index } => {
                 let base_value = ctx.state.regs[obj].take();
@@ -477,7 +465,7 @@ impl Agent {
                 let Some(obj) = base_value.as_object() else {
                     unreachable!("StoreNamedProperty is used on objects only");
                 };
-                obj.borrow_mut().create_data_property_or_throw(name, value);
+                obj.create_data_property_or_throw(name, value);
             }
             Opcode::InitializeIdent { name } => {
                 let name = ctx.get_name(name);
@@ -500,7 +488,7 @@ impl Agent {
             }
             Opcode::CreateObject => {
                 let res = JSObject::ordinary_object(Some(
-                    self.realm.borrow().intrinsics().Object.prototype.clone(),
+                    self.realm.intrinsics().Object.prototype.clone(),
                 ));
                 ctx.state.set_acc(JSValue::object(Shared::new(res)));
             }
@@ -511,7 +499,7 @@ impl Agent {
                     JSValue::undefined()
                 };
                 drop(ctx);
-                self.realm.borrow().pop_execution_context();
+                self.realm.pop_execution_context();
                 self.current_context().state.acc.set(return_value);
             }
             o => todo!("{o:?} not implemented"),
@@ -534,7 +522,7 @@ impl Agent {
         let Some(func) = target.as_object() else {
             panic!("TypeError: call target is not an object")
         };
-        if !func.borrow().callable() {
+        if !func.callable() {
             panic!("TypeError: call target is not callable")
         }
         func.call(self.script(), this_value, args.to_vec());

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fmt::Debug;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,9 +14,9 @@ use super::{JSObject, JSValue, PropertyDescriptor, Shared};
 
 pub struct Realm {
     intrinsics: RealmIntrinsics,
-    global_object: Shared<JSObject>,
-    pub global_env: Rc<GlobalEnvironmentRecord>,
-    agent: Weak<Agent>,
+    global_object: RefCell<Shared<JSObject>>,
+    pub global_env: RefCell<Rc<GlobalEnvironmentRecord>>,
+    agent: RefCell<Weak<Agent>>,
 }
 
 impl Debug for Realm {
@@ -57,22 +58,22 @@ impl Realm {
         }
         Self {
             intrinsics: RealmIntrinsics::new(),
-            global_object: Shared::new(JSObject::default()),
-            global_env: Rc::new(GlobalEnvironmentRecord::default()),
-            agent: Weak::new(),
+            global_object: RefCell::new(Shared::new(JSObject::default())),
+            global_env: RefCell::new(Rc::new(GlobalEnvironmentRecord::default())),
+            agent: RefCell::new(Weak::new()),
         }
     }
 
-    pub(super) fn set_agent(&mut self, agent: Weak<Agent>) {
+    pub(super) fn set_agent(&self, agent: Weak<Agent>) {
         assert!(
-            self.agent.upgrade().is_none(),
+            self.agent.borrow().upgrade().is_none(),
             "a realm's agent should only be set once, after the agent is constructed"
         );
-        self.agent = agent;
+        *self.agent.borrow_mut() = agent;
     }
 
     pub fn set_global_object(
-        &mut self,
+        &self,
         global_obj: Option<Shared<JSObject>>,
         this_value: Option<Shared<JSObject>>,
     ) {
@@ -82,19 +83,19 @@ impl Realm {
             )))
         });
         let this_value = this_value.unwrap_or_else(|| global_obj.clone());
-        self.global_object = global_obj.clone();
-        self.global_env = Rc::new(GlobalEnvironmentRecord::new_global_environment(
+        *self.global_object.borrow_mut() = global_obj.clone();
+        *self.global_env.borrow_mut() = Rc::new(GlobalEnvironmentRecord::new_global_environment(
             global_obj, this_value,
         ))
     }
 
-    pub fn set_default_global_bindings(&mut self) {
+    pub fn set_default_global_bindings(&self) {
         // TODO: add functions constructors and other props
         let global = self.global_object.clone();
         for (name, prop) in [
             (
                 kw::globalThis,
-                PropertyDescriptor::new(self.global_env.global_this().clone().into())
+                PropertyDescriptor::new(self.global_env.borrow().global_this().clone().into())
                     .writable(true),
             ),
             // TODO: floats
@@ -102,12 +103,13 @@ impl Realm {
             (kw::NaN, PropertyDescriptor::default()),
             (kw::undefined, PropertyDescriptor::default()),
         ] {
-            global.borrow_mut().define_property_or_throw(name, prop);
+            global.borrow().define_property_or_throw(name, prop);
         }
     }
 
     fn agent(&self) -> Rc<Agent> {
         self.agent
+            .borrow()
             .upgrade()
             .expect("realm should not outlive agent")
     }
@@ -136,14 +138,13 @@ impl Shared<Realm> {
             .writable(true)
             .configurable(true)
             .enumerable(true);
-        self.borrow()
-            .global_object
-            .borrow_mut()
+        self.global_object
+            .borrow()
             .define_property_or_throw(kw::console, prop)
     }
 
     fn console_object(&self) -> JSValue {
-        let mut obj = JSObject::ordinary_object(None);
+        let obj = JSObject::ordinary_object(None);
         fn log(_: Shared<Realm>, _: JSValue, args: Vec<JSValue>) -> JSValue {
             let mut peekable = args.into_iter().peekable();
             while let Some(a) = peekable.next() {

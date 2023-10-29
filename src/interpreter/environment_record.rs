@@ -43,7 +43,7 @@ impl GlobalEnvironmentRecord {
     pub fn create_global_var_binding(&self, name: Symbol, deletable: bool) {
         let should_create_binding = {
             let global_obj = self.object_record.borrow();
-            let global_obj = global_obj.binding_object.borrow();
+            let global_obj = &global_obj.binding_object;
             let has_prop = global_obj.has_own_property(name);
             let extensible = global_obj.extensible();
             !has_prop && extensible
@@ -61,7 +61,7 @@ impl GlobalEnvironmentRecord {
     pub fn create_global_function_binding(&self, name: Symbol, value: JSValue, deletable: bool) {
         let obj_rec = self.object_record.borrow();
         let global_obj = &obj_rec.binding_object;
-        let existing = global_obj.borrow().get_own_property(name);
+        let existing = global_obj.get_own_property(name);
         let desc = match existing {
             Some(p) if !p.is_configurable() => PropertyDescriptor::new(value)
                 .writable(true)
@@ -69,7 +69,7 @@ impl GlobalEnvironmentRecord {
                 .configurable(deletable),
             _ => PropertyDescriptor::new(value),
         };
-        global_obj.borrow_mut().define_property_or_throw(name, desc);
+        global_obj.define_property_or_throw(name, desc);
         self.var_names.borrow_mut().insert(name);
     }
 
@@ -142,7 +142,7 @@ impl ObjectEnvironmentRecord {
     }
 
     pub fn create_mutable_binding(&self, name: Symbol, deletable: bool) {
-        self.binding_object.borrow_mut().define_property_or_throw(
+        self.binding_object.define_property_or_throw(
             name,
             PropertyDescriptor::default()
                 .writable(true)
@@ -160,18 +160,16 @@ impl ObjectEnvironmentRecord {
         // let still_exists = self.binding_object.borrow().has_property(name);
         let obj = self.binding_object.clone();
         self.binding_object
-            .borrow()
             .ordinary_set(name, value, JSValue::object(obj));
     }
 
     pub fn has_binding(&self, name: Symbol) -> bool {
         let binding_object = &self.binding_object;
-        binding_object.borrow().has_property(name)
+        binding_object.has_property(name)
     }
 
     pub fn get_binding_value(&self, name: Symbol) -> JSValue {
         self.binding_object
-            .borrow()
             .ordinary_get(name, JSValue::object(self.binding_object.clone()))
     }
 }
@@ -352,13 +350,13 @@ impl EnvironmentRecord {
     }
 
     pub fn new_function_environment(f: Shared<JSObject>) -> Self {
-        let this_binding_status = match f.borrow().this_mode() {
+        let this_binding_status = match f.this_mode() {
             ThisMode::Lexical => ThisBindingStatus::Lexical,
             _ => ThisBindingStatus::Uninitialized,
         };
 
         let f = FunctionEnvironmentRecord {
-            decl: DeclarativeEnvironmentRecord::new(Some(f.borrow().environment_record())),
+            decl: DeclarativeEnvironmentRecord::new(Some(f.environment_record())),
             this_value: RefCell::new(JSValue::undefined()),
             this_binding_status: Cell::new(this_binding_status),
             function_object: f.clone(),

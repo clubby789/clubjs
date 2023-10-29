@@ -1,5 +1,5 @@
 use std::{
-    cell::Ref,
+    cell::RefCell,
     collections::{hash_map::Entry, HashMap},
     fmt::{Debug, Display},
     rc::Rc,
@@ -79,19 +79,16 @@ impl JSValue {
         }
     }
 
-    pub fn as_function(&self) -> Option<Ref<'_, Function>> {
+    pub fn as_function(&self) -> Option<&Function> {
         let JSValue::Object(o) = &self else {
             return None;
         };
-        let borrow = o.borrow();
-        Ref::filter_map(borrow, |o| {
-            if let Object::Function(f) = &o.object {
-                Some(f)
-            } else {
-                None
-            }
-        })
-        .ok()
+
+        if let Object::Function(f) = &o.object {
+            Some(f)
+        } else {
+            None
+        }
     }
 
     pub fn reference(r: ReferenceRecord) -> Self {
@@ -123,7 +120,6 @@ impl JSValue {
                     .get_value()
                     .as_object()
                     .unwrap_or_else(|| panic!("TypeError: {val} is not an object"));
-                let object = object.borrow();
                 object.ordinary_get(r.referenced_name, r.get_this_value())
             }
         }
@@ -142,9 +138,7 @@ impl JSValue {
             }
             Either::Right(val) => {
                 let base_obj = val.clone().to_object();
-                base_obj
-                    .borrow()
-                    .ordinary_set(r.referenced_name, val.clone(), r.get_this_value());
+                base_obj.ordinary_set(r.referenced_name, val.clone(), r.get_this_value());
             }
         }
     }
@@ -265,18 +259,18 @@ impl Display for JSValue {
 
 #[derive(Default, Debug)]
 pub struct JSObject {
-    prototype: Option<Shared<JSObject>>,
+    prototype: RefCell<Option<Shared<JSObject>>>,
     extensible: bool,
-    properties: HashMap<Symbol, PropertyDescriptor>,
+    properties: RefCell<HashMap<Symbol, PropertyDescriptor>>,
     object: Object,
 }
 
 impl JSObject {
     pub fn get_prototype_of(&self) -> Option<Shared<JSObject>> {
-        self.prototype.clone()
+        self.prototype.borrow().clone()
     }
 
-    pub fn set_prototype_of(&mut self, value: Option<Shared<JSObject>>) -> bool {
+    pub fn set_prototype_of(&self, value: Option<Shared<JSObject>>) -> bool {
         // let current = self.prototype.clone();
         // TODO: check samevalue
         let extensible = self.extensible;
@@ -287,18 +281,18 @@ impl JSObject {
         while let Some(pv) = p {
             // TODO: if samevalue(p, self) return false
             // TODO: if p[[GetPrototypeOf]] != Self::get_prototype_of, break
-            p = pv.borrow().get_prototype_of();
+            p = pv.get_prototype_of();
         }
-        self.prototype = value;
+        *self.prototype.borrow_mut() = value;
         true
     }
 
-    pub fn define_property_or_throw(&mut self, name: Symbol, prop: PropertyDescriptor) {
+    pub fn define_property_or_throw(&self, name: Symbol, prop: PropertyDescriptor) {
         assert!(self.define_own_property(name, prop))
     }
 
-    pub fn define_own_property(&mut self, name: Symbol, prop: PropertyDescriptor) -> bool {
-        match self.properties.entry(name) {
+    pub fn define_own_property(&self, name: Symbol, prop: PropertyDescriptor) -> bool {
+        match self.properties.borrow_mut().entry(name) {
             Entry::Occupied(mut o) if o.get().writable => {
                 *o.get_mut() = prop;
                 true
@@ -311,7 +305,7 @@ impl JSObject {
         }
     }
 
-    pub fn create_data_property(&mut self, name: Symbol, value: JSValue) -> bool {
+    pub fn create_data_property(&self, name: Symbol, value: JSValue) -> bool {
         let prop = PropertyDescriptor::new(value)
             .writable(true)
             .configurable(true)
@@ -319,7 +313,7 @@ impl JSObject {
         self.define_own_property(name, prop)
     }
 
-    pub fn create_data_property_or_throw(&mut self, name: Symbol, value: JSValue) {
+    pub fn create_data_property_or_throw(&self, name: Symbol, value: JSValue) {
         assert!(
             self.create_data_property(name, value),
             "TypeError: could not set `{name}`++"
@@ -329,7 +323,7 @@ impl JSObject {
     // TODO: property keys
     pub fn get_own_property(&self, name: Symbol) -> Option<PropertyDescriptor> {
         // TODO: accessor properties
-        self.properties.get(&name).cloned()
+        self.properties.borrow().get(&name).cloned()
     }
 
     pub fn ordinary_get(&self, name: Symbol, _receiver: JSValue) -> JSValue {
@@ -340,10 +334,10 @@ impl JSObject {
         }
         let mut cur = self.get_prototype_of();
         while let Some(parent) = cur {
-            if let Some(v) = parent.borrow().get_own_property(name) {
+            if let Some(v) = parent.get_own_property(name) {
                 return v.value;
             }
-            cur = parent.borrow().get_prototype_of();
+            cur = parent.get_prototype_of();
         }
         JSValue::undefined()
     }
@@ -354,7 +348,7 @@ impl JSObject {
             desc
         } else {
             if let Some(parent) = self.get_prototype_of() {
-                return parent.borrow().ordinary_set(name, value, receiver);
+                return parent.ordinary_set(name, value, receiver);
             }
             PropertyDescriptor::default()
                 .writable(true)
@@ -368,8 +362,7 @@ impl JSObject {
         let Some(recv_obj) = receiver.as_object() else {
             return false;
         };
-        let mut borrow = recv_obj.borrow_mut();
-        if let Some(existing) = borrow.get_own_property(name) {
+        if let Some(existing) = recv_obj.get_own_property(name) {
             if !existing.writable {
                 return false;
             }
@@ -377,14 +370,14 @@ impl JSObject {
                 .writable(true)
                 .enumerable(true)
                 .configurable(true);
-            borrow.define_own_property(name, prop)
+            recv_obj.define_own_property(name, prop)
         } else {
-            borrow.create_data_property(name, value)
+            recv_obj.create_data_property(name, value)
         }
     }
 
     pub fn has_own_property(&self, name: Symbol) -> bool {
-        self.properties.contains_key(&name)
+        self.properties.borrow().contains_key(&name)
     }
 
     pub fn has_property(&self, name: Symbol) -> bool {
@@ -394,19 +387,19 @@ impl JSObject {
 
         let mut cur = self.get_prototype_of();
         while let Some(parent) = cur {
-            if parent.borrow().has_own_property(name) {
+            if parent.has_own_property(name) {
                 return true;
             }
-            cur = parent.borrow().get_prototype_of();
+            cur = parent.get_prototype_of();
         }
         false
     }
 
     pub fn ordinary_object(prototype: Option<Shared<JSObject>>) -> Self {
         Self {
-            prototype,
+            prototype: RefCell::new(prototype),
             extensible: true,
-            properties: HashMap::new(),
+            properties: RefCell::new(HashMap::new()),
             object: Object::Ordinary,
         }
     }
@@ -435,9 +428,9 @@ impl JSObject {
     ) -> Self {
         let function = BuiltinFunction::new(realm, name, behaviour);
         JSObject {
-            prototype: None,
+            prototype: RefCell::new(None),
             extensible: true,
-            properties: HashMap::new(),
+            properties: RefCell::new(HashMap::new()),
             object: Object::BuiltinFunction(function),
         }
     }
@@ -469,10 +462,8 @@ impl JSObject {
 
 impl Shared<JSObject> {
     pub fn call(&self, script: Rc<Script>, this: JSValue, args: Vec<JSValue>) {
-        let borrowed = self.borrow();
-        match borrowed.object.clone() {
+        match self.object.clone() {
             Object::BuiltinFunction(b) => {
-                drop(borrowed);
                 // TODO: return this again
                 b.call(script, JSValue::object(self.clone()), this, args);
             }
@@ -531,9 +522,9 @@ impl BuiltinFunction {
             EnvironmentRecord::default(),
             script,
         );
-        self.realm.borrow().push_execution_context(callee_context);
+        self.realm.push_execution_context(callee_context);
         let result = (self.func)(self.realm.clone(), this, args);
-        self.realm.borrow().pop_execution_context();
+        self.realm.pop_execution_context();
         result
     }
 }
@@ -588,18 +579,18 @@ impl Function {
             script,
         );
         // OrdinaryCallBindThis
-        let this_mode = function_obj.borrow().this_mode();
+        let this_mode = function_obj.this_mode();
         if this_mode != ThisMode::Lexical {
             let callee_realm = realm;
             let this_value = if this.is_null() || this.is_undefined() {
-                callee_realm.borrow().global_env.global_this().clone()
+                callee_realm.global_env.borrow().global_this().clone()
             } else {
                 this.to_object()
             };
             local_env.bind_this_value(JSValue::object(this_value));
         }
 
-        self.realm.borrow().push_execution_context(callee_context);
+        self.realm.push_execution_context(callee_context);
         assert_eq!(
             args.len(),
             0,
