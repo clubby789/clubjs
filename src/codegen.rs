@@ -89,7 +89,7 @@ pub enum Opcode<TemporaryKind> {
     /// Call the function in the accumulator with the arg in the given temporary
     Call1(TemporaryKind),
     /// Resolve the given name in the environment, loading a
-    /// [`crate::interpreter::value::JSValueKind::Reference`] into the accumulator
+    /// [`crate::interpreter::value::JSValue::Reference`] into the accumulator
     LoadIdent(NameIndex),
     /// Perform addition of the two given registers, according to 13.15.3 ApplyStringOrNumericBinaryOperator,
     /// storing the result in the accumulator

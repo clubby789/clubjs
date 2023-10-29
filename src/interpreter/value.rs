@@ -16,70 +16,60 @@ use crate::{
 use super::{EnvironmentRecord, ExecutionContext, Realm, ReferenceRecord, Shared};
 
 #[derive(Clone, Default)]
-pub struct JSValue {
-    kind: JSValueKind,
-}
-
-impl Debug for JSValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self.kind, f)
-    }
-}
-
-impl Display for JSValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self.get_value().kind, f)
-    }
+pub enum JSValue {
+    #[default]
+    Null,
+    Undefined,
+    Bool(bool),
+    // utf16 🤓
+    String(Symbol),
+    Symbol {
+        sym: Symbol,
+        description: Option<Symbol>,
+    },
+    Number(f64),
+    // TODO: add bigint
+    BigInt(()),
+    Object(Shared<JSObject>),
+    Reference(Box<ReferenceRecord>),
 }
 
 #[allow(clippy::wrong_self_convention)] // We use ES6's naming scheme
 impl JSValue {
     pub const fn undefined() -> Self {
-        Self {
-            kind: JSValueKind::Undefined,
-        }
+        JSValue::Undefined
     }
 
     pub fn is_undefined(&self) -> bool {
-        matches!(self.kind, JSValueKind::Undefined)
+        matches!(self, JSValue::Undefined)
     }
 
     pub const fn null() -> Self {
-        Self {
-            kind: JSValueKind::Null,
-        }
+        JSValue::Null
     }
 
     pub fn is_null(&self) -> bool {
-        matches!(self.kind, JSValueKind::Null)
+        matches!(self, JSValue::Null)
     }
 
     pub fn int(n: u128) -> Self {
-        Self {
-            kind: JSValueKind::Number(n as f64),
-        }
+        JSValue::Number(n as f64)
     }
 
     pub fn number(n: f64) -> Self {
-        Self {
-            kind: JSValueKind::Number(n),
-        }
+        JSValue::Number(n)
     }
 
     pub fn string(s: Symbol) -> Self {
-        Self {
-            kind: JSValueKind::String(s),
-        }
+        JSValue::String(s)
     }
 
     pub fn object(obj: Shared<JSObject>) -> Self {
-        Self {
-            kind: JSValueKind::Object(obj),
-        }
+        JSValue::Object(obj)
     }
 
     pub fn as_object(&self) -> Option<Shared<JSObject>> {
-        if let JSValueKind::Object(o) = &self.kind {
+        if let JSValue::Object(o) = &self {
             Some(o.clone())
         } else {
             None
@@ -87,7 +77,7 @@ impl JSValue {
     }
 
     pub fn as_function(&self) -> Option<Ref<'_, Function>> {
-        let JSValueKind::Object(o) = &self.kind else {
+        let JSValue::Object(o) = &self else {
             return None;
         };
         let borrow = o.borrow();
@@ -102,13 +92,11 @@ impl JSValue {
     }
 
     pub fn reference(r: ReferenceRecord) -> Self {
-        Self {
-            kind: JSValueKind::Reference(Box::new(r)),
-        }
+        JSValue::Reference(Box::new(r))
     }
 
     pub fn as_reference(&self) -> Option<&ReferenceRecord> {
-        if let JSValueKind::Reference(r) = &self.kind {
+        if let JSValue::Reference(r) = &self {
             Some(r)
         } else {
             None
@@ -116,7 +104,8 @@ impl JSValue {
     }
 
     pub fn same_type(&self, other: &Self) -> bool {
-        std::mem::discriminant(&self.kind) == std::mem::discriminant(&other.kind)
+        // TODO: check object types
+        std::mem::discriminant(self) == std::mem::discriminant(other)
     }
 
     pub fn get_value(&self) -> Self {
@@ -138,7 +127,7 @@ impl JSValue {
     }
 
     pub fn put_value(&self, val: JSValue) {
-        let JSValueKind::Reference(r) = &self.kind else {
+        let JSValue::Reference(r) = &self else {
             panic!("ReferenceError: not a reference")
         };
         // TODO: set on global if unresolved
@@ -156,16 +145,16 @@ impl JSValue {
     }
 
     pub fn to_object(self) -> Shared<JSObject> {
-        match self.kind {
-            JSValueKind::Object(o) => o,
-            JSValueKind::Reference(_) => self.get_value().to_object(),
+        match self {
+            JSValue::Object(o) => o,
+            JSValue::Reference(_) => self.get_value().to_object(),
             _ => todo!("other ToObject conversions: {self:?}"),
         }
     }
 
     // TODO: preferred type
     pub fn to_primitive(self) -> Self {
-        let JSValueKind::Object(_o) = self.kind else {
+        let JSValue::Object(_o) = self else {
             return self;
         };
         todo!("converting object to primitive")
@@ -173,33 +162,33 @@ impl JSValue {
 
     pub fn to_numeric(self) -> Self {
         let prim = self.to_primitive();
-        if let JSValueKind::BigInt(_) = prim.kind {
+        if let JSValue::BigInt(_) = prim {
             todo!("bigints");
         };
         prim.to_number()
     }
 
     pub fn to_number(self) -> Self {
-        match self.kind {
-            JSValueKind::Number(_) => self,
-            JSValueKind::Symbol { .. } | JSValueKind::BigInt(_) => {
+        match self {
+            JSValue::Number(_) => self,
+            JSValue::Symbol { .. } | JSValue::BigInt(_) => {
                 panic!("TypeError: converting `{self}` to a number")
             }
-            JSValueKind::Undefined => Self::number(f64::NAN),
-            JSValueKind::Null => Self::number(0.0),
-            JSValueKind::Bool(b) => Self::number(b as u8 as f64),
-            JSValueKind::String(s) => Self::number(s.as_str().parse().unwrap_or(f64::NAN)),
-            JSValueKind::Object(_) => todo!("requires toprimitive preferred"),
-            JSValueKind::Reference(_) => unreachable!(),
+            JSValue::Undefined => Self::number(f64::NAN),
+            JSValue::Null => Self::number(0.0),
+            JSValue::Bool(b) => Self::number(b as u8 as f64),
+            JSValue::String(s) => Self::number(s.as_str().parse().unwrap_or(f64::NAN)),
+            JSValue::Object(_) => todo!("requires toprimitive preferred"),
+            JSValue::Reference(_) => unreachable!(),
         }
     }
 
-    /// Adds together two [`JSValueKind::Number`]s or [`JSValueKind::BigInt`]s
+    /// Adds together two [`JSValue::Number`]s or [`JSValue::BigInt`]s
     pub fn add(self, other: Self) -> Self {
         debug_assert!(self.same_type(&other));
-        match (self.kind, other.kind) {
-            (JSValueKind::Number(l), JSValueKind::Number(r)) => JSValue::number(l + r),
-            (JSValueKind::BigInt(_), JSValueKind::BigInt(_)) => todo!("bigint::add"),
+        match (self, other) {
+            (JSValue::Number(l), JSValue::Number(r)) => JSValue::number(l + r),
+            (JSValue::BigInt(_), JSValue::BigInt(_)) => todo!("bigint::add"),
             _ => unreachable!(),
         }
     }
@@ -207,40 +196,17 @@ impl JSValue {
 
 impl From<bool> for JSValue {
     fn from(value: bool) -> Self {
-        JSValue {
-            kind: JSValueKind::Bool(value),
-        }
+        JSValue::Bool(value)
     }
 }
 
 impl From<Shared<JSObject>> for JSValue {
     fn from(value: Shared<JSObject>) -> Self {
-        JSValue {
-            kind: JSValueKind::Object(value),
-        }
+        JSValue::Object(value)
     }
 }
 
-#[derive(Clone, Default)]
-enum JSValueKind {
-    #[default]
-    Null,
-    Undefined,
-    Bool(bool),
-    // utf16 🤓
-    String(Symbol),
-    Symbol {
-        sym: Symbol,
-        description: Option<Symbol>,
-    },
-    Number(f64),
-    // TODO: add bigint
-    BigInt(()),
-    Object(Shared<JSObject>),
-    Reference(Box<ReferenceRecord>),
-}
-
-impl Debug for JSValueKind {
+impl Debug for JSValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Null => write!(f, "Null"),
@@ -260,20 +226,20 @@ impl Debug for JSValueKind {
     }
 }
 
-impl Display for JSValueKind {
+impl Display for JSValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            JSValueKind::Null => write!(f, "null"),
-            JSValueKind::Undefined => write!(f, "undefined"),
-            JSValueKind::Bool(b) => write!(f, "{b}"),
-            JSValueKind::String(s) => write!(f, "{s}"),
-            JSValueKind::Symbol { description, .. } => {
+            JSValue::Null => write!(f, "null"),
+            JSValue::Undefined => write!(f, "undefined"),
+            JSValue::Bool(b) => write!(f, "{b}"),
+            JSValue::String(s) => write!(f, "{s}"),
+            JSValue::Symbol { description, .. } => {
                 write!(f, "Symbol({})", description.unwrap_or(kw::Empty))
             }
-            JSValueKind::Number(n) => write!(f, "{n}"),
-            JSValueKind::BigInt(_) => todo!(),
-            JSValueKind::Object(_) => write!(f, "[object Object]"),
-            JSValueKind::Reference(_) => {
+            JSValue::Number(n) => write!(f, "{n}"),
+            JSValue::BigInt(_) => todo!(),
+            JSValue::Object(_) => write!(f, "[object Object]"),
+            JSValue::Reference(_) => {
                 /*match r.base {
                     Either::Left(env) => env.get_binding_value(r.referenced_name),
                     Either::Right(o) => Display::fmt(o)
