@@ -43,10 +43,12 @@ impl<T> Shared<T> {
         Self(Rc::new(RefCell::new(value)))
     }
 
+    #[track_caller]
     pub fn borrow(&self) -> Ref<'_, T> {
         self.0.borrow()
     }
 
+    #[track_caller]
     pub fn borrow_mut(&self) -> RefMut<'_, T> {
         self.0.borrow_mut()
     }
