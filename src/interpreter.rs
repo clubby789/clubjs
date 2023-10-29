@@ -525,14 +525,8 @@ impl Agent {
             if reference.is_property_reference() {
                 reference.get_this_value()
             } else {
-                let ref_env = reference
-                    .base
-                    .as_ref()
-                    .expect_left("checked above that this is not a property");
-                ref_env
-                    .with_base_object()
-                    .map(JSValue::object)
-                    .unwrap_or(JSValue::undefined())
+                // We would do WithBaseObject here, but we don't support `with`
+                JSValue::undefined()
             }
         } else {
             JSValue::undefined()
