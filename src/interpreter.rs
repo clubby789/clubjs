@@ -469,15 +469,6 @@ impl Agent {
                 let reference = ctx.resolve_binding(name, None);
                 JSValue::reference(reference).put_value(value);
             }
-            Opcode::StoreProperty { obj } => {
-                let base_ref = ctx.state.regs[obj].take();
-                debug_assert!(
-                    base_ref.as_reference().is_some(),
-                    "StoreProperty takes a reference"
-                );
-                let value = ctx.state.acc.take();
-                base_ref.put_value(value);
-            }
             Opcode::Add(l, r) => {
                 let res = self.do_add(ctx.state.regs[l].take(), ctx.state.regs[r].take());
                 ctx.state.set_acc(res);

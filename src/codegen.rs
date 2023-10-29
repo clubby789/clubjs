@@ -10,8 +10,8 @@ use smallvec::SmallVec;
 
 use crate::{
     ast::{
-        self, BinaryOperator, Block, Expression, ExpressionKind, MemberKey, Program, Scope,
-        Statement, StatementKind, VariableDeclaration, VariableKind,
+        self, AssignmentOperator, BinaryOperator, Block, Expression, ExpressionKind, MemberKey,
+        Program, Scope, Statement, StatementKind, VariableDeclaration, VariableKind,
     },
     intern::Symbol,
     lex::{kw, Literal},
@@ -43,9 +43,6 @@ pub enum Opcode<TemporaryKind> {
     },
     /// Create an empty object in the accumulator
     CreateObject,
-    /// Store the value in the accumulator into the property reference
-    /// in [`obj`].
-    StoreProperty { obj: TemporaryKind },
     /// Store the value in the accumulator into the object in [`obj`],
     /// at the property name held in [`name`]. Used for initializing
     /// object literals.
@@ -379,7 +376,7 @@ impl FunctionBuilder {
             ExpressionKind::Arrow(_) => todo!(),
             ExpressionKind::Unary(_, _) => todo!(),
             ExpressionKind::Binary(l, op, r) => self.codegen_binary(*l, op, *r),
-            ExpressionKind::Assignment(_, _, _) => todo!(),
+            ExpressionKind::Assignment(tgt, op, value) => self.codegen_assign(*tgt, op, *value),
             ExpressionKind::Update(_, _, _) => todo!(),
             ExpressionKind::Logical(_, _, _) => todo!(),
             ExpressionKind::Ternary {
@@ -453,6 +450,42 @@ impl FunctionBuilder {
         let op = match op {
             BinaryOperator::Plus => Opcode::Add(left, right),
             o => todo!("`{o:?}`"),
+        };
+        self.code.push(op);
+    }
+
+    /// Evaluate first the left, then right expression, then assign the right value
+    /// to the left reference. If op is anything other than [`AssignmentOperator::Eq`],
+    /// perform the assignment according to the operator.
+    fn codegen_assign(&mut self, l: Node<Expression>, op: AssignmentOperator, r: Node<Expression>) {
+        let l = l.take();
+        let op = match l.kind {
+            ExpressionKind::Identifier(ident) => {
+                let name_idx = self.add_name(ident);
+                self.codegen_expression(r);
+                Opcode::StoreIdent { name: name_idx }
+            }
+            ExpressionKind::Member(left, MemberKey::Static(name)) => {
+                let left = self.codegen_expression_to_temporary(*left);
+                let name_idx = self.add_name(name);
+                self.codegen_expression(r);
+                Opcode::StoreNamedProperty {
+                    obj: left,
+                    name: name_idx,
+                }
+            }
+            ExpressionKind::Member(left, MemberKey::Computed(expr)) => {
+                let left = self.codegen_expression_to_temporary(*left);
+                let prop = self.codegen_expression_to_temporary(*expr);
+                self.codegen_expression(r);
+                Opcode::StoreComputedProperty {
+                    obj: left,
+                    index: prop,
+                }
+            }
+            _ => unreachable!(
+                "non simple assignment target {l:?} should have been handled during parsing"
+            ),
         };
         self.code.push(op);
     }

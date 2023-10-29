@@ -271,7 +271,11 @@ pub enum ExpressionKind {
     Arrow(Node<Function>),
     Unary(UnaryOperator, Box<Node<Expression>>),
     Binary(Box<Node<Expression>>, BinaryOperator, Box<Node<Expression>>),
-    Assignment(Symbol, AssignmentOperator, Box<Node<Expression>>),
+    Assignment(
+        Box<Node<Expression>>,
+        AssignmentOperator,
+        Box<Node<Expression>>,
+    ),
     /// the bool is true if the operator is a prefix
     Update(Box<Node<Expression>>, UpdateOperator, bool),
     Logical(
@@ -1532,18 +1536,11 @@ impl<'a> Parser<'a> {
             TokenKind::AndEquals => AssignmentOperator::AndEq,
             _ => unreachable!(),
         };
-        let ExpressionKind::Identifier(var) = left.kind else {
-            // TODO: support proper patterns
-            report_fatal_error(
-                "left-hand side of assignment must be variable (for now)",
-                left.span(),
-            );
-        };
         let right = self.parse_expression_precedence(Precedence::ASSIGNMENT.next());
         let span = left.span().to(right.span());
         self.alloc_node(
             Expression {
-                kind: ExpressionKind::Assignment(var, op, Box::new(right)),
+                kind: ExpressionKind::Assignment(Box::new(left), op, Box::new(right)),
             },
             span,
         )

@@ -69,7 +69,10 @@ impl JSValue {
     }
 
     pub fn as_object(&self) -> Option<Shared<JSObject>> {
-        if let JSValue::Object(o) = &self {
+        // TODO: do this without recursion
+        if let JSValue::Reference(_) = self {
+            self.get_value().as_object()
+        } else if let JSValue::Object(o) = &self {
             Some(o.clone())
         } else {
             None
