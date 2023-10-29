@@ -1344,7 +1344,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_member(&mut self, left: Node<Expression>) -> Node<Expression> {
-        let start = self.prev_token.span();
+        let start = left.span();
         let key = match self.prev_token.kind() {
             TokenKind::Dot => MemberKey::Static(self.expect_ident()),
             TokenKind::LBracket => {
