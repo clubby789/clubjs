@@ -14,7 +14,7 @@ use super::{JSObject, JSValue, PropertyDescriptor, Shared};
 pub struct Realm {
     intrinsics: RealmIntrinsics,
     global_object: Shared<JSObject>,
-    pub global_env: Shared<GlobalEnvironmentRecord>,
+    pub global_env: Rc<GlobalEnvironmentRecord>,
     agent: Weak<Agent>,
 }
 
@@ -58,7 +58,7 @@ impl Realm {
         Self {
             intrinsics: RealmIntrinsics::new(),
             global_object: Shared::new(JSObject::default()),
-            global_env: Shared::new(GlobalEnvironmentRecord::default()),
+            global_env: Rc::new(GlobalEnvironmentRecord::default()),
             agent: Weak::new(),
         }
     }
@@ -83,7 +83,7 @@ impl Realm {
         });
         let this_value = this_value.unwrap_or_else(|| global_obj.clone());
         self.global_object = global_obj.clone();
-        self.global_env = Shared::new(GlobalEnvironmentRecord::new_global_environment(
+        self.global_env = Rc::new(GlobalEnvironmentRecord::new_global_environment(
             global_obj, this_value,
         ))
     }
@@ -94,7 +94,7 @@ impl Realm {
         for (name, prop) in [
             (
                 kw::globalThis,
-                PropertyDescriptor::new(self.global_env.borrow().global_this().clone().into())
+                PropertyDescriptor::new(self.global_env.global_this().clone().into())
                     .writable(true),
             ),
             // TODO: floats

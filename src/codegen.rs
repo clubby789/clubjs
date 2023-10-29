@@ -505,7 +505,11 @@ impl FunctionBuilder {
             self.bound_names.insert(declr.name, decl.kind);
             if let Some(init) = declr.init {
                 self.codegen_expression(init);
-                self.code.push(Opcode::InitializeIdent { name: name_idx })
+                if decl.kind.lexical() {
+                    self.code.push(Opcode::InitializeIdent { name: name_idx })
+                } else {
+                    self.code.push(Opcode::StoreIdent { name: name_idx })
+                }
             }
         }
     }

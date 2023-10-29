@@ -134,6 +134,8 @@ impl JSValue {
             panic!("ReferenceError: not a reference")
         };
         // TODO: set on global if unresolved
+        // IsPropertyReference - if Right it is a property reference,
+        // otherwise no
         match &r.base {
             Either::Left(env) => {
                 env.set_mutable_binding(r.referenced_name, val);
@@ -590,12 +592,7 @@ impl Function {
         if this_mode != ThisMode::Lexical {
             let callee_realm = realm;
             let this_value = if this.is_null() || this.is_undefined() {
-                callee_realm
-                    .borrow()
-                    .global_env
-                    .borrow()
-                    .global_this()
-                    .clone()
+                callee_realm.borrow().global_env.global_this().clone()
             } else {
                 this.to_object()
             };

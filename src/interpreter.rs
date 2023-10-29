@@ -325,10 +325,9 @@ impl Agent {
 
     fn global_declaration_instantiation(
         script: &codegen::Script,
-        env: Shared<GlobalEnvironmentRecord>,
+        env: Rc<GlobalEnvironmentRecord>,
         realm: Shared<Realm>,
     ) {
-        let mut env_r = env.borrow_mut();
         let var_declarations = script.var_scoped_declarations().collect::<Vec<_>>();
 
         let mut declared_function_names = HashSet::new();
@@ -361,17 +360,17 @@ impl Agent {
 
         for (dn, _) in script.lexically_scoped_declarations() {
             // TODO: support const
-            env_r.create_mutable_binding(dn, false);
+            env.create_mutable_binding(dn, false);
         }
 
         for (name, func) in functions_to_initialize {
             let fo =
                 realm.instantiate_function_object(func, EnvironmentRecord::Global(env.clone()));
-            env_r.create_global_function_binding(name, fo, false);
+            env.create_global_function_binding(name, fo, false);
         }
 
         for vn in declared_var_names {
-            env_r.create_global_var_binding(vn, false);
+            env.create_global_var_binding(vn, false);
         }
     }
 
