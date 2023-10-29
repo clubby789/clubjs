@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    cmp::Ordering,
     collections::{hash_map::Entry, HashMap},
     fmt::{Debug, Display},
     rc::Rc,
@@ -153,10 +154,11 @@ impl JSValue {
 
     // TODO: preferred type
     pub fn to_primitive(self) -> Self {
-        let JSValue::Object(_o) = self else {
-            return self;
-        };
-        todo!("converting object to primitive")
+        match self {
+            JSValue::Object(_o) => todo!("converting object to primitive"),
+            JSValue::Reference(_) => self.get_value().to_primitive(),
+            _ => self,
+        }
     }
 
     pub fn to_numeric(self) -> Self {
@@ -189,12 +191,36 @@ impl JSValue {
         }
     }
 
+    pub fn to_boolean(self) -> bool {
+        match self {
+            JSValue::Bool(b) => b,
+            JSValue::Undefined | JSValue::Null => false,
+            JSValue::Number(n) if n == 0.0 || n == -0.0 || n.is_nan() => false,
+            JSValue::String(s) if s.as_str().is_empty() => false,
+            _ => true,
+        }
+    }
+
     /// Adds together two [`JSValue::Number`]s or [`JSValue::BigInt`]s
     pub fn add(self, other: Self) -> Self {
         debug_assert!(self.same_type(&other));
         match (self, other) {
             (JSValue::Number(l), JSValue::Number(r)) => JSValue::number(l + r),
             (JSValue::BigInt(_), JSValue::BigInt(_)) => todo!("bigint::add"),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Compares two [`JSValue::Number`]s or [`JSValue::BigInt`]s
+    pub fn less_than(self, other: Self) -> Self {
+        debug_assert!(self.same_type(&other));
+        match (self, other) {
+            (JSValue::Number(l), JSValue::Number(r)) => match l.partial_cmp(&r) {
+                Some(Ordering::Less) => JSValue::Bool(true),
+                None => JSValue::Number(f64::NAN),
+                _ => JSValue::Bool(false),
+            },
+            (JSValue::BigInt(_), JSValue::BigInt(_)) => todo!("bigint::lessThan"),
             _ => unreachable!(),
         }
     }

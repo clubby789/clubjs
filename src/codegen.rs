@@ -10,8 +10,8 @@ use smallvec::SmallVec;
 
 use crate::{
     ast::{
-        self, AssignmentOperator, BinaryOperator, Block, Expression, ExpressionKind, MemberKey,
-        Program, Scope, Statement, StatementKind, VariableDeclaration, VariableKind,
+        self, AssignmentOperator, BinaryOperator, Block, Expression, ExpressionKind, ForInit,
+        MemberKey, Program, Scope, Statement, StatementKind, VariableDeclaration, VariableKind,
     },
     intern::Symbol,
     lex::{kw, Literal},
@@ -22,6 +22,10 @@ use crate::{
 /// a register/memory reference after optimization`
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Opcode<TemporaryKind> {
+    /// Creates a new lexcial environment for the block
+    EnterBlock { scope: ScopeIndex },
+    /// Restores the previous LexcialEnvironment in the running context
+    LeaveBlock,
     /// Trigger the debugger
     Debugger,
     /// Return from the running function. If [`value`] is true,
@@ -91,12 +95,30 @@ pub enum Opcode<TemporaryKind> {
     /// Perform addition of the two given registers, according to 13.15.3 ApplyStringOrNumericBinaryOperator,
     /// storing the result in the accumulator
     Add(TemporaryKind, TemporaryKind),
+    /// Compares the left and right values, according to `7.2.13 IsLessThan`, storing the result
+    /// (a boolean or undefined) in the accumulator
+    LessThan(TemporaryKind, TemporaryKind),
+    /// Create a new environment as per `14.7.4.4 CreatePerIterationEnvironment`, if we have any
+    /// lexical declarations
+    // TODO: do bindings
+    CreatePerIterationEnvironment,
+    #[cfg(debug_assertions)]
+    /// No-op, but when debug_assertions are enabled all jumps must land on a JumpTarget instruction
+    JumpTarget,
+    /// Set the pc to the given index
+    Jump { idx: usize },
+    /// If `ToBoolean(GetValue(accumulator))` is false, set the pc to the given index
+    JumpIfFalse { idx: usize },
+
+    /// Placeholder opcode used only during codegen. Should never be reached
+    Unreachable,
 }
 
 pub type TemporaryIndex = usize;
 pub type NameIndex = usize;
 pub type StringIndex = usize;
 pub type AnonFunctionIndex = usize;
+pub type ScopeIndex = usize;
 
 #[derive(Debug, Default)]
 pub struct Script {
@@ -106,6 +128,7 @@ pub struct Script {
     functions: HashMap<Symbol, Rc<Function>>,
     names: IndexSet<Symbol>,
     strings: IndexSet<Symbol>,
+    scopes: Vec<Scope>,
 }
 
 impl Script {
@@ -115,6 +138,10 @@ impl Script {
 
     pub fn names(&self) -> &Slice<Symbol> {
         self.names.as_slice()
+    }
+
+    pub fn scopes(&self) -> &[Scope] {
+        &self.scopes
     }
 
     pub fn strings(&self) -> &Slice<Symbol> {
@@ -147,7 +174,7 @@ pub struct Function {
     anon_functions: Vec<Rc<Function>>,
     names: IndexSet<Symbol>,
     name: Symbol,
-
+    scopes: Vec<Scope>,
     strings: IndexSet<Symbol>,
     // TODO: make sure this interacts properly with names/bound names!!!!
     param_list: Vec<ast::FunctionParam>,
@@ -164,6 +191,10 @@ impl Function {
 
     pub fn opcodes(&self) -> &[Opcode<usize>] {
         self.code.as_ref()
+    }
+
+    pub fn scopes(&self) -> &[Scope] {
+        &self.scopes
     }
 
     pub fn strings(&self) -> &Slice<Symbol> {
@@ -230,6 +261,7 @@ pub struct FunctionBuilder {
     bound_names: HashMap<Symbol, VariableKind>,
     names: IndexSet<Symbol>,
     strings: IndexSet<Symbol>,
+    scopes: Vec<Scope>,
 }
 
 impl FunctionBuilder {
@@ -249,6 +281,7 @@ impl FunctionBuilder {
             names: f.names,
             variable_declarations: f.bound_names,
             strings: f.strings,
+            scopes: f.scopes,
         }
     }
 
@@ -279,6 +312,7 @@ impl FunctionBuilder {
             variable_declarations: f.bound_names,
             param_list: params.into_inner(),
             strings: f.strings,
+            scopes: f.scopes,
             name,
         }
     }
@@ -293,7 +327,7 @@ impl FunctionBuilder {
         match stmt.take().kind {
             StatementKind::Empty => (),
             StatementKind::Debugger => self.code.push(Opcode::Debugger),
-            StatementKind::Block(block) => todo!(),
+            StatementKind::Block(block) => self.codegen_block(block),
             StatementKind::Expression(expr) => self.codegen_expression(expr),
             StatementKind::If(_, _, _, _) => todo!(),
             StatementKind::Labeled(_, _) => todo!(),
@@ -319,7 +353,7 @@ impl FunctionBuilder {
                 header_scope,
                 body,
                 body_scope,
-            } => todo!(),
+            } => self.codegen_for_loop(init, test, update, header_scope, *body, body_scope),
             StatementKind::ForIn {
                 target,
                 iter,
@@ -343,6 +377,17 @@ impl FunctionBuilder {
                 self.functions.insert(f.name, Rc::new(f));
             }
         }
+    }
+
+    fn codegen_block(&mut self, block: Block) {
+        self.code.push(Opcode::EnterBlock {
+            scope: self.scopes.len(),
+        });
+        self.scopes.push(block.scope);
+        for stmt in block.statements {
+            self.codegen_statement(stmt);
+        }
+        self.code.push(Opcode::LeaveBlock);
     }
 
     /// Evaluate the given expression, storing the result in the accumulator
@@ -454,6 +499,7 @@ impl FunctionBuilder {
         let right = self.codegen_expression_to_temporary(r);
         let op = match op {
             BinaryOperator::Plus => Opcode::Add(left, right),
+            BinaryOperator::Lt => Opcode::LessThan(left, right),
             o => todo!("`{o:?}`"),
         };
         self.code.push(op);
@@ -512,6 +558,84 @@ impl FunctionBuilder {
                 }
             }
         }
+    }
+
+    fn codegen_for_loop(
+        &mut self,
+        init: Option<Node<ForInit>>,
+        test: Option<Node<Expression>>,
+        update: Option<Node<Expression>>,
+        header_scope: Scope,
+        body: Node<Statement>,
+        body_scope: Scope,
+    ) {
+        let mut has_lexical_decls = false;
+        if let Some(init) = init {
+            match init.item() {
+                // TODO: this is bad. Maybe bring back `fn consume(self) -> (T, usize, Span)`
+                ForInit::VariableDeclaration(_) => {
+                    let decl = init.map(|i| {
+                        if let ForInit::VariableDeclaration(d) = i {
+                            d
+                        } else {
+                            has_lexical_decls = true;
+                            unreachable!()
+                        }
+                    });
+                    if decl.kind.lexical() {
+                        todo!("lexical for declarations aren't supported yet")
+                    } else {
+                        self.codegen_variable_declaration(decl);
+                    }
+                }
+                ForInit::Expression(_) => {
+                    let expr = init.map(|i| {
+                        if let ForInit::Expression(d) = i {
+                            d
+                        } else {
+                            unreachable!()
+                        }
+                    });
+                    self.codegen_expression(expr);
+                }
+            }
+        }
+        if has_lexical_decls {
+            self.code.push(Opcode::CreatePerIterationEnvironment);
+        }
+        let loop_start_idx = self.code.len();
+        // Start of the loop
+        #[cfg(debug_assertions)]
+        self.code.push(Opcode::JumpTarget);
+
+        // Index of the test's jump instruction. Needs to be edited after the loop
+        // body is codegenned so we can jump to the right exit point
+        let mut test_jump_idx = None;
+
+        if let Some(test) = test {
+            self.codegen_expression(test);
+            test_jump_idx = Some(self.code.len());
+            self.code.push(Opcode::Unreachable);
+        }
+
+        self.codegen_statement(body);
+        // TODO: handle break, continue
+
+        if let Some(update) = update {
+            self.codegen_expression(update);
+        }
+
+        self.code.push(Opcode::Jump {
+            idx: loop_start_idx,
+        });
+
+        if let Some(idx) = test_jump_idx {
+            self.code[idx] = Opcode::JumpIfFalse {
+                idx: self.code.len(),
+            };
+        }
+        #[cfg(debug_assertions)]
+        self.code.push(Opcode::JumpTarget);
     }
 
     /// Store the contents of the accumulator into the object in [`obj`]

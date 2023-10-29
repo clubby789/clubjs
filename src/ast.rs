@@ -444,6 +444,16 @@ impl Scope {
             }
         }
     }
+
+    /// Returns an iterator over the lexical declarations in this scope, and their
+    /// mutability
+    pub fn lexical_declarations(&self) -> impl Iterator<Item = (Symbol, bool)> + '_ {
+        self.0.iter().filter_map(|(&sym, kind)| match kind {
+            VariableKind::Var => Some((sym, true)),
+            VariableKind::Let => Some((sym, false)),
+            VariableKind::Const => None,
+        })
+    }
 }
 
 /// Run parsing code with a new scope, returning the parsed value

@@ -174,11 +174,35 @@ impl ObjectEnvironmentRecord {
     }
 }
 
-/// Map of bindings to their values and their mutability
+/// Map of bindings to their values, mutability and deletability
 #[derive(Default, Debug)]
 pub struct DeclarativeEnvironmentRecord {
     outer_env: Option<EnvironmentRecord>,
-    bindings: RefCell<HashMap<Symbol, (Option<JSValue>, bool)>>,
+    bindings: RefCell<HashMap<Symbol, (Option<JSValue>, Deletable, Mutable)>>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Deletable {
+    Yes,
+    No,
+}
+
+impl Deletable {
+    pub fn deletable(&self) -> bool {
+        matches!(self, Deletable::Yes)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Mutable {
+    Yes,
+    No,
+}
+
+impl Mutable {
+    pub fn mutable(&self) -> bool {
+        matches!(self, Mutable::Yes)
+    }
 }
 
 impl DeclarativeEnvironmentRecord {
@@ -198,7 +222,14 @@ impl DeclarativeEnvironmentRecord {
             !self.bindings.borrow().contains_key(&name),
             "binding `{name}` exists"
         );
-        self.bindings.borrow_mut().insert(name, (None, deletable));
+        let deletable = if deletable {
+            Deletable::Yes
+        } else {
+            Deletable::No
+        };
+        self.bindings
+            .borrow_mut()
+            .insert(name, (None, deletable, Mutable::Yes));
     }
 
     pub fn initialize_binding(&self, name: Symbol, value: JSValue) {
@@ -215,14 +246,14 @@ impl DeclarativeEnvironmentRecord {
                 if o.get().0.is_none() {
                     panic!("ReferenceError: {name} is uninitialized");
                 }
-                if !o.get().1 {
+                if !o.get().2.mutable() {
                     panic!("TypeError: {name} is immutable");
                 }
                 o.get_mut().0 = Some(value);
             }
             Entry::Vacant(v) => {
                 // TODO: referenceerror if strict
-                v.insert((Some(value), true));
+                v.insert((Some(value), Deletable::Yes, Mutable::Yes));
             }
         }
     }
@@ -231,7 +262,7 @@ impl DeclarativeEnvironmentRecord {
         self.bindings
             .borrow()
             .get(&name)
-            .map(|(v, _)| v.clone())
+            .map(|(v, _, _)| v.clone())
             .unwrap_or_else(|| unreachable!("no binding for {name}"))
             .unwrap_or_else(|| panic!("ReferenceError: {name} is uninitialized"))
     }

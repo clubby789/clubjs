@@ -1,5 +1,5 @@
 use crate::{
-    ast,
+    ast::{self, Scope},
     codegen::{self, Declaration, Opcode, ScopeAnalysis, Script},
     intern::Symbol,
     span::Node,
@@ -8,7 +8,7 @@ use either::Either;
 use environment_record::{EnvironmentRecord, GlobalEnvironmentRecord};
 use realm::Realm;
 use std::{
-    cell::{Cell, Ref, RefCell},
+    cell::{Cell, Ref, RefCell, RefMut},
     collections::HashSet,
     ops::Deref,
     path::PathBuf,
@@ -16,7 +16,7 @@ use std::{
 };
 use value::{JSObject, JSValue, PropertyDescriptor};
 
-use self::value::ThisMode;
+use self::{environment_record::DeclarativeEnvironmentRecord, value::ThisMode};
 
 mod environment_record;
 mod realm;
@@ -146,6 +146,14 @@ impl ExecutionContext {
         }
     }
 
+    pub fn get_scope(&self, index: usize) -> Scope {
+        if let Some(f) = self.function.as_function() {
+            f.code().scopes()[index].clone()
+        } else {
+            self.script.scopes()[index].clone()
+        }
+    }
+
     pub fn get_this_environment(&self) -> EnvironmentRecord {
         let mut env = self.lexical_environment.clone();
         while !env.has_this_binding() {
@@ -269,6 +277,13 @@ impl Agent {
             v.last().expect("should always have a context")
         }
         Ref::map(self.contexts.borrow(), get_last)
+    }
+
+    fn current_context_mut(&self) -> RefMut<'_, ExecutionContext> {
+        fn get_last(v: &mut Vec<ExecutionContext>) -> &mut ExecutionContext {
+            v.last_mut().expect("should always have a context")
+        }
+        RefMut::map(self.contexts.borrow_mut(), get_last)
     }
 
     fn script(&self) -> Rc<Script> {
@@ -486,6 +501,10 @@ impl Agent {
                 let res = self.do_add(ctx.state.regs[l].take(), ctx.state.regs[r].take());
                 ctx.state.set_acc(res);
             }
+            Opcode::LessThan(l, r) => {
+                let res = self.do_less_than(ctx.state.regs[l].take(), ctx.state.regs[r].take());
+                ctx.state.set_acc(res);
+            }
             Opcode::CreateObject => {
                 let res = JSObject::ordinary_object(Some(
                     self.realm.intrinsics().Object.prototype.clone(),
@@ -501,6 +520,42 @@ impl Agent {
                 drop(ctx);
                 self.realm.pop_execution_context();
                 self.current_context().state.acc.set(return_value);
+            }
+            Opcode::CreatePerIterationEnvironment => {
+                // TODO: if we have lexical declarations we need to bind them
+            }
+            #[cfg(debug_assertions)]
+            Opcode::JumpTarget => (),
+            Opcode::Jump { idx } => ctx.state.pc.set(idx),
+            Opcode::JumpIfFalse { idx } => {
+                let val = ctx.state.acc.take();
+                if !val.get_value().to_boolean() {
+                    ctx.state.pc.set(idx);
+                }
+            }
+            Opcode::EnterBlock { scope } => {
+                let block_env =
+                    DeclarativeEnvironmentRecord::new(Some(ctx.lexical_environment.clone()));
+                let scope = ctx.get_scope(scope);
+                for (name, mutable) in scope.lexical_declarations() {
+                    // TODO: functions
+                    if mutable {
+                        block_env.create_mutable_binding(name, false)
+                    } else {
+                        todo!("immutable bindings")
+                    }
+                }
+                drop(ctx);
+                self.current_context_mut().lexical_environment =
+                    EnvironmentRecord::Declarative(Rc::new(block_env));
+            }
+            Opcode::LeaveBlock => {
+                let env = ctx
+                    .lexical_environment
+                    .outer_env()
+                    .expect("mismatched leave/enter block");
+                drop(ctx);
+                self.current_context_mut().lexical_environment = env;
             }
             o => todo!("{o:?} not implemented"),
         }
@@ -539,5 +594,22 @@ impl Agent {
             "TypeError: adding `{lnum}` and `{rnum}`"
         );
         lnum.add(rnum)
+    }
+
+    fn do_less_than(&self, left: JSValue, right: JSValue) -> JSValue {
+        let lprim = left.to_primitive();
+        let rprim = right.to_primitive();
+        // TODO: strings
+        assert!(
+            lprim.same_type(&rprim),
+            "comparing different values is not supported yet: {lprim:?}, {rprim:?}"
+        );
+        let lnum = lprim.to_numeric();
+        let rnum = rprim.to_numeric();
+        assert!(
+            lnum.same_type(&rnum),
+            "TypeError: adding `{lnum}` and `{rnum}`"
+        );
+        lnum.less_than(rnum)
     }
 }
