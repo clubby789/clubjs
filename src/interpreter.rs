@@ -526,8 +526,18 @@ impl Agent {
             }
             #[cfg(debug_assertions)]
             Opcode::JumpTarget => (),
-            Opcode::Jump { idx } => ctx.state.pc.set(idx),
+            Opcode::Jump { idx } => {
+                #[cfg(debug_assertions)]
+                if ctx.get_op(idx) != Some(Opcode::JumpTarget) {
+                    panic!("jump to invalid location {idx}");
+                }
+                ctx.state.pc.set(idx);
+            }
             Opcode::JumpIfFalse { idx } => {
+                #[cfg(debug_assertions)]
+                if ctx.get_op(idx) != Some(Opcode::JumpTarget) {
+                    panic!("jump to invalid location {idx}");
+                }
                 let val = ctx.state.acc.take();
                 if !val.get_value().to_boolean() {
                     ctx.state.pc.set(idx);
