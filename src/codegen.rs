@@ -24,10 +24,10 @@ use crate::{
 pub enum Opcode<TemporaryKind> {
     /// Trigger the debugger
     Debugger,
-    /// Push a new context to the stack
-    PushContext,
-    /// Remove the current context from the stack
-    PopContext,
+    /// Return from the running function. If [`value`] is true,
+    /// in the accumulator is used as the return value,
+    /// and placed into the previous execution context's accumulator.
+    Return { value: bool },
     /// Load <this> into the accumulator
     LoadThis,
     /// Create an empty array in the accumulator
@@ -267,6 +267,10 @@ impl FunctionBuilder {
         for stmt in statements {
             f.codegen_statement(stmt)
         }
+        if !matches!(f.code.last(), Some(Opcode::Return { .. })) {
+            // implicit empty return
+            f.code.push(Opcode::Return { value: false });
+        }
         Function {
             code: f.code,
             anon_functions: f.anon_functions,
@@ -289,20 +293,21 @@ impl FunctionBuilder {
         match stmt.take().kind {
             StatementKind::Empty => (),
             StatementKind::Debugger => self.code.push(Opcode::Debugger),
-            StatementKind::Block(block) => {
-                self.code.push(Opcode::PushContext);
-                for stmt in block.statements {
-                    self.codegen_statement(stmt);
-                }
-                self.code.push(Opcode::PopContext);
-            }
+            StatementKind::Block(block) => todo!(),
             StatementKind::Expression(expr) => self.codegen_expression(expr),
             StatementKind::If(_, _, _, _) => todo!(),
             StatementKind::Labeled(_, _) => todo!(),
             StatementKind::Break(_) => todo!(),
             StatementKind::Continue(_) => todo!(),
             StatementKind::Switch(_, _) => todo!(),
-            StatementKind::Return(_) => todo!(),
+            StatementKind::Return(expr) => {
+                if let Some(e) = expr {
+                    self.codegen_expression(e);
+                    self.code.push(Opcode::Return { value: true })
+                } else {
+                    self.code.push(Opcode::Return { value: false })
+                }
+            }
             StatementKind::Throw(_) => todo!(),
             StatementKind::Try(_, _, _) => todo!(),
             StatementKind::While(_, _) => todo!(),

@@ -503,6 +503,16 @@ impl Agent {
                 ));
                 ctx.state.set_acc(JSValue::object(Shared::new(res)));
             }
+            Opcode::Return { value } => {
+                let return_value = if value {
+                    ctx.state.acc.take()
+                } else {
+                    JSValue::undefined()
+                };
+                drop(ctx);
+                self.realm.borrow().pop_execution_context();
+                self.current_context().state.acc.set(return_value);
+            }
             o => todo!("{o:?} not implemented"),
         }
         true
