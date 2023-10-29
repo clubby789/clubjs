@@ -1,7 +1,7 @@
 use crate::span::{SourceMap, Span};
-use std::{fmt::Display, sync::OnceLock};
+use std::{fmt::Display, sync::RwLock};
 
-pub static SESSION: OnceLock<Session> = OnceLock::new();
+pub static SESSION: RwLock<Option<Session>> = RwLock::new(None);
 
 #[derive(Debug)]
 pub struct Session {
@@ -35,7 +35,7 @@ impl Session {
 /// Reports an error message, including a highltighted snippet
 /// of the offending code, then exits.
 pub fn report_fatal_error<M: Display>(msg: M, span: Span) -> ! {
-    if let Some(sess) = crate::SESSION.get() {
+    if let Ok(Some(sess)) = crate::SESSION.read().as_deref() {
         sess.report_fatal_error(msg, span)
     } else {
         eprintln!("fatal error: {msg}");

@@ -471,9 +471,10 @@ macro_rules! parse_with_scope {
 impl<'a> Parser<'a> {
     pub fn new(source: &'a str, path: PathBuf) -> Self {
         let mut lexer = Lexer::new(source);
-        crate::SESSION
-            .set(Session::new(SourceMap::from_src(source.to_string(), path)))
-            .unwrap();
+        if let Ok(mut sess) = crate::SESSION.write() {
+            *sess = Some(Session::new(SourceMap::from_src(source.to_string(), path)));
+        }
+
         let token = lexer.next_token();
         Self {
             lexer,

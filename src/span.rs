@@ -53,7 +53,7 @@ impl Span {
 
 impl Debug for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(sess) = crate::SESSION.get() {
+        if let Ok(Some(sess)) = crate::SESSION.read().as_deref() {
             let sm = sess.sourcemap();
             write!(
                 f,

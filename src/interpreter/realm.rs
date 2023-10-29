@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::rc::{Rc, Weak};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::ast::FunctionParam;
 use crate::codegen::{Function, Script};
@@ -52,10 +51,6 @@ impl ObjectIntrinsic {
 
 impl Realm {
     pub fn new() -> Self {
-        static CREATED: AtomicBool = AtomicBool::new(false);
-        if CREATED.swap(true, Ordering::Relaxed) {
-            panic!("creating multiple realms is not supported");
-        }
         Self {
             intrinsics: RealmIntrinsics::new(),
             global_object: RefCell::new(Shared::new(JSObject::default())),
