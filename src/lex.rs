@@ -251,7 +251,7 @@ impl<'a> Lexer<'a> {
             ';' => TokenKind::Semicolon,
             '*' if self.try_eat('=') => TokenKind::AsteriskEquals,
             '*' => TokenKind::Asterisk,
-            '.' if self.try_eat_str("==") => TokenKind::EqualsEqualsEquals,
+            '=' if self.try_eat_str("==") => TokenKind::EqualsEqualsEquals,
             '=' if self.try_eat('=') => TokenKind::EqualsEquals,
             '=' if self.try_eat('>') => TokenKind::Arrow,
             '=' => TokenKind::Equals,
@@ -298,9 +298,9 @@ impl<'a> Lexer<'a> {
                 }
                 TokenKind::Literal(Literal::Integer(n))
             }
-            c if c.is_ascii_alphabetic() || c == '_' => {
+            c if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
                 while self
-                    .try_eat_fn(|c| c.is_ascii_alphanumeric() || c == '_')
+                    .try_eat_fn(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
                     .is_some()
                 {}
                 TokenKind::Ident

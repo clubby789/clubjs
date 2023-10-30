@@ -22,6 +22,7 @@ dependencies = [
  "clubjs-macros",
  "either",
  "fxhash",
+ "glob",
  "indexmap",
  "once_cell",
  "smallvec",
@@ -56,6 +57,12 @@ checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
 dependencies = [
  "byteorder",
 ]
+
+[[package]]
+name = "glob"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
 
 [[package]]
 name = "hashbrown"

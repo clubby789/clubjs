@@ -26,6 +26,8 @@ pub enum Opcode<TemporaryKind> {
     EnterBlock { scope: ScopeIndex },
     /// Restores the previous LexcialEnvironment in the running context
     LeaveBlock,
+    /// Throw an exception. Right now, this just panics
+    Throw,
     /// Trigger the debugger
     Debugger,
     /// Return from the running function. If [`value`] is true,
@@ -98,6 +100,13 @@ pub enum Opcode<TemporaryKind> {
     /// Compares the left and right values, according to `7.2.13 IsLessThan`, storing the result
     /// (a boolean or undefined) in the accumulator
     LessThan(TemporaryKind, TemporaryKind),
+    /// Compares the left and right values, using `IsLooselyEqual` if [`strict`] is false;
+    /// otherwise, `IsStrictlyEqual`
+    Eq {
+        left: TemporaryKind,
+        right: TemporaryKind,
+        strict: bool,
+    },
     /// Create a new environment as per `14.7.4.4 CreatePerIterationEnvironment`, if we have any
     /// lexical declarations
     // TODO: do bindings
@@ -329,7 +338,7 @@ impl FunctionBuilder {
             StatementKind::Debugger => self.code.push(Opcode::Debugger),
             StatementKind::Block(block) => self.codegen_block(block),
             StatementKind::Expression(expr) => self.codegen_expression(expr),
-            StatementKind::If(_, _, _, _) => todo!(),
+            StatementKind::If(test, then, els, _) => self.codegen_if(test, *then, els.map(|b| *b)),
             StatementKind::Labeled(_, _) => todo!(),
             StatementKind::Break(_) => todo!(),
             StatementKind::Continue(_) => todo!(),
@@ -342,7 +351,10 @@ impl FunctionBuilder {
                     self.code.push(Opcode::Return { value: false })
                 }
             }
-            StatementKind::Throw(_) => todo!(),
+            StatementKind::Throw(expr) => {
+                self.codegen_expression(expr);
+                self.code.push(Opcode::Throw);
+            }
             StatementKind::Try(_, _, _) => todo!(),
             StatementKind::While(_, _) => todo!(),
             StatementKind::DoWhile(_, _) => todo!(),
@@ -500,6 +512,16 @@ impl FunctionBuilder {
         let op = match op {
             BinaryOperator::Plus => Opcode::Add(left, right),
             BinaryOperator::Lt => Opcode::LessThan(left, right),
+            BinaryOperator::EqEq => Opcode::Eq {
+                left,
+                right,
+                strict: false,
+            },
+            BinaryOperator::EqEqEq => Opcode::Eq {
+                left,
+                right,
+                strict: true,
+            },
             o => todo!("`{o:?}`"),
         };
         self.code.push(op);
@@ -557,6 +579,36 @@ impl FunctionBuilder {
                     self.code.push(Opcode::StoreIdent { name: name_idx })
                 }
             }
+        }
+    }
+
+    fn codegen_if(
+        &mut self,
+        test: Node<Expression>,
+        then: Node<Statement>,
+        els: Option<Node<Statement>>,
+    ) {
+        self.codegen_expression(test);
+        let jump_false = self.code.len();
+        // Change to JumpIfFalse after we codegen the body
+        self.code.push(Opcode::Unreachable);
+        self.codegen_statement(then);
+        // After we codegen all (if any) else blocks, we'll need to jump over them
+        let jump_always = self.code.len();
+        self.code.push(Opcode::Unreachable);
+
+        self.code[jump_false] = Opcode::JumpIfFalse {
+            idx: self.code.len(),
+        };
+        #[cfg(debug_assertions)]
+        self.code.push(Opcode::JumpTarget);
+        if let Some(els) = els {
+            self.codegen_statement(els);
+        }
+        #[cfg(debug_assertions)]
+        self.code.push(Opcode::JumpTarget);
+        self.code[jump_always] = Opcode::Jump {
+            idx: self.code.len(),
         }
     }
 

@@ -955,8 +955,8 @@ impl<'a> Parser<'a> {
                 });
                 self.expect(TokenKind::LBrace);
                 // inline parse_block here because we need to add the catch variable to the scope
-                let block = {
-                    let (statements, scope) = parse_with_scope! {self:
+                let (block, _) = {
+                    parse_with_scope! {self:
                         {
                             if let Some(sym) = param {
                                 self.scopes
@@ -964,10 +964,9 @@ impl<'a> Parser<'a> {
                                     .expect("there should always be one scope")
                                     .insert(sym, VariableKind::Var);
                             }
-                            std::iter::from_fn(|| self.parse_statement_or_expr()).collect()
+                            self.parse_block()
                         }
-                    };
-                    Block { statements, scope }
+                    }
                 };
                 self.expect(TokenKind::RBrace);
                 catch = Some(self.alloc_node(
@@ -1041,7 +1040,12 @@ impl<'a> Parser<'a> {
         let mut expr = func(self);
         while self.get_rule(self.token).precedence >= prec {
             self.advance();
-            expr = self.get_rule(self.prev_token).infix.unwrap()(self, expr);
+            expr = self
+                .get_rule(self.prev_token)
+                .infix
+                .unwrap_or_else(|| panic!("no infix rule for {:?}", self.prev_token))(
+                self, expr
+            );
         }
         Some(expr)
     }
@@ -1095,7 +1099,7 @@ impl<'a> Parser<'a> {
             TokenKind::EqualsEquals
             | TokenKind::BangEquals
             | TokenKind::EqualsEqualsEquals
-            | TokenKind::BangEqualsEquals => r!(Self::parse_unary, _, EQUALITY),
+            | TokenKind::BangEqualsEquals => r!(_, Self::parse_binary, EQUALITY),
             TokenKind::Gt | TokenKind::GtEquals | TokenKind::Lt | TokenKind::LtEquals => {
                 r!(_, Self::parse_binary, COMPARE)
             }

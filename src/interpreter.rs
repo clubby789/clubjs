@@ -522,6 +522,18 @@ impl Agent {
                 let res = self.do_less_than(ctx.state.regs[l].take(), ctx.state.regs[r].take());
                 ctx.state.set_acc(res);
             }
+            Opcode::Eq {
+                left,
+                right,
+                strict,
+            } => {
+                let res = self.do_eq(
+                    ctx.state.regs[left].take().get_value(),
+                    ctx.state.regs[right].take().get_value(),
+                    strict,
+                );
+                ctx.state.set_acc(JSValue::Bool(res));
+            }
             Opcode::CreateObject => {
                 let res = JSObject::ordinary_object(Some(
                     self.realm.borrow().intrinsics().Object.prototype.clone(),
@@ -638,5 +650,36 @@ impl Agent {
             "TypeError: adding `{lnum}` and `{rnum}`"
         );
         lnum.less_than(rnum)
+    }
+
+    fn do_eq(&self, left: JSValue, right: JSValue, strict: bool) -> bool {
+        if strict || left.same_type(&right) {
+            if !left.same_type(&right) {
+                return false;
+            }
+            if let (JSValue::Number(l), JSValue::Number(r)) = (left, right) {
+                return if l.is_nan() || r.is_nan() {
+                    false
+                } else if l == r {
+                    true
+                } else if l == -0.0 && r == 0.0 {
+                    true
+                } else if l == 0.0 && r == -0.0 {
+                    true
+                } else {
+                    false
+                };
+            } else {
+                todo!("SameValueNonNumber")
+            }
+        }
+        if left.is_null() && right.is_undefined() {
+            return true;
+        }
+        if left.is_undefined() && right.is_null() {
+            return true;
+        }
+        // TODO: all the other stuff
+        false
     }
 }
