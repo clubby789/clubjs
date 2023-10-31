@@ -319,18 +319,33 @@ impl JSObject {
         }
     }
 
-    pub fn define_own_property(&self, name: Symbol, prop: PropertyDescriptor) -> bool {
+    pub fn define_own_property(&self, name: Symbol, desc: PropertyDescriptor) -> bool {
         // TODO: ValidateAndApplyPropertyDescriptor
         match self.properties.borrow_mut().entry(name) {
-            Entry::Occupied(mut o) => {
-                let o = o.get_mut();
-                assert!(o.is_configurable(), "10.1.6.3.5 not implemented yet");
+            Entry::Occupied(mut cur) => {
+                let cur = cur.get_mut();
                 // TODO: change between data and accessor
-                *o = prop;
+                if !cur.is_configurable() {
+                    if desc.is_configurable() {
+                        return false;
+                    }
+                    if cur.is_enumerable() && !desc.is_enumerable() {
+                        return false;
+                    }
+                    if !cur.is_writable() {
+                        if desc.is_writable() {
+                            return false;
+                        }
+                        // TODO: check SameValue
+                    }
+                }
+                if !cur.value().is_undefined() {
+                    *cur = desc;
+                }
                 true
             }
             Entry::Vacant(v) => {
-                v.insert(prop);
+                v.insert(desc);
                 true
             }
         }
@@ -647,7 +662,7 @@ pub struct PropertyDescriptor {
     writable: bool,
     // get: (),
     // set: (),
-    _enumerable: bool,
+    enumerable: bool,
     configurable: bool,
 }
 
@@ -658,7 +673,7 @@ impl PropertyDescriptor {
         Self {
             value,
             writable: false,
-            _enumerable: false,
+            enumerable: false,
             configurable: false,
         }
     }
@@ -667,11 +682,16 @@ impl PropertyDescriptor {
         Self { writable, ..self }
     }
 
+    pub fn is_writable(&self) -> bool {
+        self.writable
+    }
+
     pub fn enumerable(self, enumerable: bool) -> Self {
-        Self {
-            _enumerable: enumerable,
-            ..self
-        }
+        Self { enumerable, ..self }
+    }
+
+    pub fn is_enumerable(&self) -> bool {
+        self.enumerable
     }
 
     pub fn configurable(self, configurable: bool) -> Self {
@@ -683,6 +703,10 @@ impl PropertyDescriptor {
 
     pub fn is_configurable(&self) -> bool {
         self.configurable
+    }
+
+    pub fn value(&self) -> &JSValue {
+        &self.value
     }
 }
 

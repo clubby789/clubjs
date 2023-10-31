@@ -95,7 +95,7 @@ impl GlobalEnvironmentRecord {
     }
 
     pub fn set_mutable_binding(&self, name: Symbol, value: JSValue) {
-        if self.declarative_record.borrow().has_binding(name) {
+        if dbg!(self.declarative_record.borrow().has_binding(dbg!(name))) {
             return self
                 .declarative_record
                 .borrow_mut()
