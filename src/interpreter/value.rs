@@ -503,6 +503,14 @@ impl JSObject {
         };
         f.environment.clone()
     }
+
+    pub fn as_function(&self) -> Option<&Function> {
+        if let Object::Function(f) = &self.object {
+            Some(f)
+        } else {
+            None
+        }
+    }
 }
 
 impl Shared<JSObject> {
@@ -634,17 +642,16 @@ impl Function {
             };
             local_env.bind_this_value(JSValue::object(this_value));
         }
-
+        callee_context.function_declaration_instantiation(function_obj, &args);
         self.realm.push_execution_context(callee_context);
-        assert_eq!(
-            args.len(),
-            0,
-            "passing args to ordinary functions is not supported"
-        );
     }
 
     pub fn code(&self) -> &codegen::Function {
         self.ecma_script_code.as_ref()
+    }
+
+    pub fn formal_paramaters(&self) -> &[Symbol] {
+        self.formal_paramaters.as_ref()
     }
 }
 

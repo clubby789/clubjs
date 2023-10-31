@@ -316,10 +316,10 @@ impl FunctionEnvironmentRecord {
 }
 
 impl EnvironmentRecord {
-    pub fn outer_env(&self) -> Option<EnvironmentRecord> {
+    pub fn outer_env(&self) -> Option<&EnvironmentRecord> {
         match self {
-            EnvironmentRecord::Declarative(d) => d.outer_env.clone(),
-            EnvironmentRecord::Function(f) => f.decl.outer_env.clone(),
+            EnvironmentRecord::Declarative(d) => d.outer_env.as_ref(),
+            EnvironmentRecord::Function(f) => f.decl.outer_env.as_ref(),
             EnvironmentRecord::Global(_) => None,
         }
     }
@@ -361,6 +361,14 @@ impl EnvironmentRecord {
             EnvironmentRecord::Declarative(d) => d.get_binding_value(name),
             EnvironmentRecord::Function(f) => f.decl.get_binding_value(name),
             EnvironmentRecord::Global(g) => g.get_binding_value(name),
+        }
+    }
+
+    pub fn create_mutable_binding(&self, name: Symbol, deletable: bool) {
+        match self {
+            EnvironmentRecord::Declarative(d) => d.create_mutable_binding(name, deletable),
+            EnvironmentRecord::Function(f) => f.decl.create_mutable_binding(name, deletable),
+            EnvironmentRecord::Global(g) => g.create_mutable_binding(name, deletable),
         }
     }
 

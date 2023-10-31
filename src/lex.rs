@@ -109,6 +109,9 @@ pub mod kw {
         console,
         log,
         default,
+        arguments,
+        value,
+        done,
     }
 }
 

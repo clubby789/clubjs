@@ -2,10 +2,12 @@ use crate::{
     ast::{self, Scope},
     codegen::{self, Declaration, Opcode, ScopeAnalysis, Script},
     intern::Symbol,
+    lex::{self, kw},
     span::Node,
 };
 use either::Either;
 use environment_record::{EnvironmentRecord, GlobalEnvironmentRecord};
+use indexmap::IndexSet;
 use realm::Realm;
 use std::{
     cell::{Cell, Ref, RefCell, RefMut},
@@ -96,12 +98,16 @@ impl ExecutionContext {
         }
     }
 
-    pub fn resolve_binding(&self, name: Symbol, env: Option<EnvironmentRecord>) -> ReferenceRecord {
-        let mut env = Some(env.unwrap_or(self.lexical_environment.clone()));
+    pub fn resolve_binding(
+        &self,
+        name: Symbol,
+        env: Option<&EnvironmentRecord>,
+    ) -> ReferenceRecord {
+        let mut env = Some(env.unwrap_or(&self.lexical_environment));
         while let Some(e) = env {
             if e.has_binding(name) {
                 return ReferenceRecord {
-                    base: Either::Left(e),
+                    base: Either::Left(e.clone()),
                     referenced_name: name,
                     this_value: None,
                 };
@@ -154,12 +160,95 @@ impl ExecutionContext {
         }
     }
 
-    pub fn get_this_environment(&self) -> EnvironmentRecord {
-        let mut env = self.lexical_environment.clone();
+    pub fn get_this_environment(&self) -> &EnvironmentRecord {
+        let mut env = &self.lexical_environment;
         while !env.has_this_binding() {
             env = env.outer_env().expect("9.4.3.2.d");
         }
         env
+    }
+
+    fn function_declaration_instantiation(
+        &self,
+        function_object: Shared<JSObject>,
+        args: &[JSValue],
+    ) {
+        let function = function_object
+            .as_function()
+            .expect("Should only receive function objects");
+        let function_code = function.code();
+        let callee_context = self;
+        // TODO: Handle duplicate params
+        // TODO: handle non simple params
+        let simple_param_list = true;
+        let var_names = function_code.var_declared_names();
+        let var_decls = function_code.var_scoped_declarations().collect::<Vec<_>>();
+        let lex_names = function_code.lexically_declared_names().collect::<Vec<_>>();
+        let mut function_names = IndexSet::new();
+        let mut functions_to_initialize = vec![];
+        for (sym, decl) in var_decls.iter().rev() {
+            if let Declaration::Function(f) = decl {
+                if !function_names.insert(*sym) {
+                    functions_to_initialize.push(f);
+                }
+            }
+        }
+        let mut args_object_needed = false;
+        if function_object.this_mode() == ThisMode::Lexical {
+            args_object_needed = false;
+        } else if function.formal_paramaters().contains(&kw::arguments) {
+            args_object_needed = false;
+        } else if true
+        /* TODO: has_param_expressions */
+        {
+            if function_names.contains(&kw::arguments) || lex_names.contains(&kw::arguments) {
+                args_object_needed = false;
+            }
+        }
+        let env = if true
+        /* TODO: has_param_expressions and strict */
+        {
+            &callee_context.lexical_environment
+        } else {
+            todo!("need a new env record in case of eval")
+        };
+        for _ in function.formal_paramaters() {
+            // TODO: has_duplicates
+        }
+
+        let param_bindings = if args_object_needed {
+            if simple_param_list {
+            } else {
+                todo!("10.2.11.22.a")
+            }
+            todo!("args object");
+        } else {
+            function.formal_paramaters()
+        };
+
+        for param_name in function.formal_paramaters() {
+            env.create_mutable_binding(*param_name, false);
+        }
+
+        for (i, binding) in param_bindings.iter().enumerate() {
+            let lhs = callee_context.resolve_binding(*binding, Some(env));
+            let v = args.get(i).unwrap_or(&JSValue::Undefined);
+            env.initialize_binding(lhs.referenced_name, v.clone());
+        }
+
+        let mut instantiated_var_names = HashSet::new();
+        for n in var_names {
+            if instantiated_var_names.insert(n) {
+                env.create_mutable_binding(n, false);
+            }
+        }
+
+        let lex_env = DeclarativeEnvironmentRecord::new(Some(env.clone()));
+
+        for (dn, _) in function_code.lexically_scoped_declarations() {
+            lex_env.create_mutable_binding(dn, false);
+        }
+        assert!(function_names.is_empty(), "nested functions not yet supported");
     }
 }
 
@@ -593,6 +682,7 @@ impl Agent {
                     .lexical_environment
                     .outer_env()
                     .expect("mismatched leave/enter block");
+                let env = env.clone();
                 drop(ctx);
                 self.current_context_mut().lexical_environment = env;
             }
