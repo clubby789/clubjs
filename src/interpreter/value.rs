@@ -314,20 +314,25 @@ impl JSObject {
     }
 
     pub fn define_property_or_throw(&self, name: Symbol, prop: PropertyDescriptor) {
-        assert!(self.define_own_property(name, prop))
+        if !self.define_own_property(name, prop) {
+            panic!("TypeError: could not define property {name}")
+        }
     }
 
     pub fn define_own_property(&self, name: Symbol, prop: PropertyDescriptor) -> bool {
+        // TODO: ValidateAndApplyPropertyDescriptor
         match self.properties.borrow_mut().entry(name) {
-            Entry::Occupied(mut o) if o.get().writable => {
-                *o.get_mut() = prop;
+            Entry::Occupied(mut o) => {
+                let o = o.get_mut();
+                assert!(o.is_configurable(), "10.1.6.3.5 not implemented yet");
+                // TODO: change between data and accessor
+                *o = prop;
                 true
             }
             Entry::Vacant(v) => {
                 v.insert(prop);
                 true
             }
-            _ => false,
         }
     }
 
@@ -340,10 +345,9 @@ impl JSObject {
     }
 
     pub fn create_data_property_or_throw(&self, name: Symbol, value: JSValue) {
-        assert!(
-            self.create_data_property(name, value),
-            "TypeError: could not set `{name}`++"
-        )
+        if self.create_data_property(name, value) {
+            panic!("TypeError: could not set `{name}`")
+        }
     }
 
     // TODO: property keys
