@@ -1,13 +1,10 @@
-#![allow(unused)]
-
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt::{Debug, Display, Formatter},
     rc::Rc,
 };
 
 use indexmap::{set::Slice, IndexSet};
-use smallvec::SmallVec;
 
 use crate::{
     ast::{
@@ -26,6 +23,7 @@ mod cfg;
 /// [`TemporaryKind`] will either be an incrementing counter or
 /// a register/memory reference after optimization`
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[allow(unused)]
 pub enum Opcode<TemporaryKind> {
     /// Creates a new lexcial environment for the block
     EnterBlock { scope: ScopeIndex },
@@ -145,7 +143,7 @@ pub type ScopeIndex = usize;
 
 #[derive(Debug, Default)]
 pub struct Script {
-    code: Vec<Opcode<TemporaryIndex>>,
+    cfg: ControlFlowGraph<TemporaryIndex>,
     variable_declarations: HashMap<Symbol, VariableKind>,
     anon_functions: Vec<Rc<Function>>,
     functions: HashMap<Symbol, Rc<Function>>,
@@ -155,8 +153,8 @@ pub struct Script {
 }
 
 impl Script {
-    pub fn opcodes(&self) -> &[Opcode<usize>] {
-        self.code.as_ref()
+    pub fn cfg(&self) -> &ControlFlowGraph<TemporaryIndex> {
+        &self.cfg
     }
 
     pub fn names(&self) -> &Slice<Symbol> {
@@ -191,7 +189,7 @@ impl ScopeAnalysis for Script {
 
 #[derive(Debug)]
 pub struct Function {
-    code: Vec<Opcode<TemporaryIndex>>,
+    cfg: ControlFlowGraph<TemporaryIndex>,
     variable_declarations: HashMap<Symbol, VariableKind>,
     functions: HashMap<Symbol, Rc<Function>>,
     anon_functions: Vec<Rc<Function>>,
@@ -212,8 +210,8 @@ impl Function {
         self.names.as_slice()
     }
 
-    pub fn opcodes(&self) -> &[Opcode<usize>] {
-        self.code.as_ref()
+    pub fn cfg(&self) -> &ControlFlowGraph<TemporaryIndex> {
+        &self.cfg
     }
 
     pub fn scopes(&self) -> &[Scope] {
@@ -247,7 +245,7 @@ impl ScopeAnalysis for Function {
 pub trait ScopeAnalysis {
     fn declarations(&self) -> impl Iterator<Item = (Symbol, Declaration, VariableKind)>;
     fn bound_names(&self) -> impl Iterator<Item = (Symbol, VariableKind)> {
-        self.declarations().map(|(s, d, v)| (s, v))
+        self.declarations().map(|(s, _, v)| (s, v))
     }
     fn lexically_declared_names(&self) -> impl Iterator<Item = Symbol> {
         self.bound_names()
@@ -275,7 +273,6 @@ pub enum Declaration {
 // FIXME: refactor this into a generic 'codegen context'
 #[derive(Default)]
 pub struct FunctionBuilder {
-    code: Vec<Opcode<TemporaryIndex>>,
     cfg: ControlFlowGraph<TemporaryIndex>,
     anon_functions: Vec<Rc<Function>>,
     functions: HashMap<Symbol, Rc<Function>>,
@@ -290,11 +287,8 @@ pub struct FunctionBuilder {
 
 impl FunctionBuilder {
     pub fn codegen_script(script: Node<Program>) -> Script {
-        let mut f = Self {
-            code: Vec::with_capacity(script.body.len()),
-            ..Default::default()
-        };
-        let Block { statements, scope } = script.take().body;
+        let mut f = FunctionBuilder::default();
+        let Block { statements, .. } = script.take().body;
         // TODO: remove the linear codegen
         f.cfg.new_block();
         for stmt in statements {
@@ -302,7 +296,7 @@ impl FunctionBuilder {
         }
         println!("{}", f.cfg);
         Script {
-            code: f.code,
+            cfg: f.cfg,
             anon_functions: f.anon_functions,
             functions: f.functions,
             names: f.names,
@@ -313,27 +307,24 @@ impl FunctionBuilder {
     }
 
     fn codegen_function(func: Node<ast::Function>) -> Function {
-        let mut f = Self {
-            code: Vec::with_capacity(func.body.len()),
-            ..Default::default()
-        };
+        let mut f = FunctionBuilder::default();
         let name = func.name.unwrap_or(kw::default);
         // TODO: handle rest
         let ast::Function {
             params,
-            body: Block { statements, scope },
+            body: Block { statements, .. },
             ..
         } = func.take();
         f.cfg.new_block();
         for stmt in statements {
             f.codegen_statement(stmt)
         }
-        if !matches!(f.code.last(), Some(Opcode::Return { .. })) {
-            // implicit empty return
-            f.code.push(Opcode::Return { value: false });
-        }
+        f.cfg
+            .current_block()
+            .try_set_terminator(Terminator::Return { value: false })
+            .ok();
         Function {
-            code: f.code,
+            cfg: f.cfg,
             anon_functions: f.anon_functions,
             functions: f.functions,
             names: f.names,
@@ -355,7 +346,6 @@ impl FunctionBuilder {
         match stmt.take().kind {
             StatementKind::Empty => (),
             StatementKind::Debugger => {
-                self.code.push(Opcode::Debugger);
                 self.cfg.add_op(Opcode::Debugger);
             }
             StatementKind::Block(block) => self.codegen_block(block),
@@ -368,12 +358,10 @@ impl FunctionBuilder {
             StatementKind::Return(expr) => {
                 if let Some(e) = expr {
                     self.codegen_expression(e);
-                    self.code.push(Opcode::Return { value: true });
                     self.cfg
                         .current_block()
                         .set_terminator(cfg::Terminator::Return { value: true });
                 } else {
-                    self.code.push(Opcode::Return { value: false });
                     self.cfg
                         .current_block()
                         .set_terminator(cfg::Terminator::Return { value: false });
@@ -381,7 +369,6 @@ impl FunctionBuilder {
             }
             StatementKind::Throw(expr) => {
                 self.codegen_expression(expr);
-                self.code.push(Opcode::Throw);
                 todo!("basic block terminator for Throw")
             }
             StatementKind::Try(_, _, _) => todo!(),
@@ -395,20 +382,8 @@ impl FunctionBuilder {
                 body,
                 body_scope,
             } => self.codegen_for_loop(init, test, update, header_scope, *body, body_scope),
-            StatementKind::ForIn {
-                target,
-                iter,
-                header_scope,
-                body,
-                body_scope,
-            } => todo!(),
-            StatementKind::ForOf {
-                target,
-                iter,
-                header_scope,
-                body,
-                body_scope,
-            } => todo!(),
+            StatementKind::ForIn { .. } => todo!(),
+            StatementKind::ForOf { .. } => todo!(),
             StatementKind::VariableDeclaration(decl) => {
                 self.codegen_variable_declaration(decl);
             }
@@ -424,13 +399,11 @@ impl FunctionBuilder {
         let op = Opcode::EnterBlock {
             scope: self.scopes.len(),
         };
-        self.code.push(op);
         self.cfg.add_op(op);
         self.scopes.push(block.scope);
         for stmt in block.statements {
             self.codegen_statement(stmt);
         }
-        self.code.push(Opcode::LeaveBlock);
         self.cfg.add_op(Opcode::LeaveBlock);
     }
 
@@ -438,23 +411,19 @@ impl FunctionBuilder {
     fn codegen_expression(&mut self, expr: Node<Expression>) {
         match expr.take().kind {
             ExpressionKind::This => {
-                self.code.push(Opcode::LoadThis);
                 self.cfg.add_op(Opcode::LoadThis);
             }
             ExpressionKind::Array(exprs) => {
-                self.code.push(Opcode::CreateArray);
                 self.cfg.add_op(Opcode::CreateArray);
                 let arr = self.store_temporary();
                 for (idx, expr) in exprs.into_iter().enumerate() {
                     self.codegen_expression(expr);
                     let op = Opcode::StoreInArrayIdx { arr, idx };
-                    self.code.push(op);
                     self.cfg.add_op(op);
                 }
                 self.load_temporary(arr)
             }
             ExpressionKind::Object(props) => {
-                self.code.push(Opcode::CreateObject);
                 self.cfg.add_op(Opcode::CreateObject);
                 let obj = self.store_temporary();
                 for (name, node) in props.into_iter() {
@@ -473,7 +442,6 @@ impl FunctionBuilder {
                 let idx = self.anon_functions.len();
                 self.anon_functions.push(Rc::new(f));
                 let op = Opcode::LoadFunc(idx);
-                self.code.push(op);
                 self.cfg.add_op(op);
             }
             ExpressionKind::Arrow(_) => todo!(),
@@ -482,11 +450,7 @@ impl FunctionBuilder {
             ExpressionKind::Assignment(tgt, op, value) => self.codegen_assign(*tgt, op, *value),
             ExpressionKind::Update(_, _, _) => todo!(),
             ExpressionKind::Logical(_, _, _) => todo!(),
-            ExpressionKind::Ternary {
-                test,
-                consequent,
-                alternate,
-            } => todo!(),
+            ExpressionKind::Ternary { .. } => todo!(),
             ExpressionKind::New(target, args) => {
                 let func = self.codegen_expression_to_temporary(*target);
                 let args: Vec<_> = args
@@ -499,7 +463,6 @@ impl FunctionBuilder {
                     &[a] => Opcode::Construct1(a),
                     _ => todo!("construcing length {}", args.len()),
                 };
-                self.code.push(op);
                 self.cfg.add_op(op);
             }
             ExpressionKind::Delete(_) => todo!(),
@@ -515,7 +478,6 @@ impl FunctionBuilder {
                     &[a] => Opcode::Call1(a),
                     _ => todo!("calling length {}", args.len()),
                 };
-                self.code.push(op);
                 self.cfg.add_op(op);
             }
             ExpressionKind::Member(base, key) => {
@@ -524,7 +486,6 @@ impl FunctionBuilder {
                     MemberKey::Static(name) => {
                         let name = self.add_name(name);
                         let op = Opcode::GetNamedProperty { obj: base, name };
-                        self.code.push(op);
                         self.cfg.add_op(op);
                     }
                     MemberKey::Computed(expr) => {
@@ -534,17 +495,14 @@ impl FunctionBuilder {
                             obj: base,
                             index: expr,
                         };
-                        self.code.push(op);
                         self.cfg.add_op(op);
                     }
                 }
             }
             ExpressionKind::Literal(lit) => self.codegen_literal(lit),
-            ExpressionKind::Literal(_) => todo!(),
             ExpressionKind::Identifier(ident) => {
                 let name = self.add_name(ident);
                 let op = Opcode::LoadIdent(name);
-                self.code.push(op);
                 self.cfg.add_op(op);
             }
         }
@@ -565,7 +523,6 @@ impl FunctionBuilder {
                 Opcode::LoadString(idx)
             }
         };
-        self.code.push(op);
         self.cfg.add_op(op);
     }
 
@@ -589,7 +546,6 @@ impl FunctionBuilder {
             },
             o => todo!("`{o:?}`"),
         };
-        self.code.push(op);
         self.cfg.add_op(op);
     }
 
@@ -598,6 +554,7 @@ impl FunctionBuilder {
     /// perform the assignment according to the operator.
     fn codegen_assign(&mut self, l: Node<Expression>, op: AssignmentOperator, r: Node<Expression>) {
         let l = l.take();
+        assert_eq!(op, AssignmentOperator::Eq);
         let op = match l.kind {
             ExpressionKind::Identifier(ident) => {
                 let name_idx = self.add_name(ident);
@@ -626,7 +583,6 @@ impl FunctionBuilder {
                 "non simple assignment target {l:?} should have been handled during parsing"
             ),
         };
-        self.code.push(op);
         self.cfg.add_op(op);
     }
 
@@ -636,8 +592,8 @@ impl FunctionBuilder {
             let declr = declr.take();
             let binding_id = declr.name;
             // TODO: anonymous functions
-            let name_idx = self.add_name(declr.name);
-            self.bound_names.insert(declr.name, decl.kind);
+            let name_idx = self.add_name(binding_id);
+            self.bound_names.insert(binding_id, decl.kind);
             if let Some(init) = declr.init {
                 self.codegen_expression(init);
                 let op = if decl.kind.lexical() {
@@ -645,7 +601,6 @@ impl FunctionBuilder {
                 } else {
                     Opcode::StoreIdent { name: name_idx }
                 };
-                self.code.push(op);
                 self.cfg.add_op(op);
             }
         }
@@ -659,23 +614,10 @@ impl FunctionBuilder {
     ) {
         // TODO: make this non-recursive so we can have a single exit basic block
         self.codegen_expression(test);
-        let jump_false = self.code.len();
-        // Change to JumpIfFalse after we codegen the body
-        self.code.push(Opcode::Unreachable);
-
         let test_block = self.cfg.current_idx();
         let then_block = self.cfg.new_block();
 
         self.codegen_statement(then);
-        // After we codegen all (if any) else blocks, we'll need to jump over them
-        let jump_always = self.code.len();
-        self.code.push(Opcode::Unreachable);
-
-        self.code[jump_false] = Opcode::JumpIfFalse {
-            idx: self.code.len(),
-        };
-
-        self.code.push(Opcode::JumpTarget);
 
         let after_then = self.cfg.new_block();
 
@@ -698,11 +640,6 @@ impl FunctionBuilder {
         self.cfg
             .get_block(then_block)
             .set_terminator(Terminator::Unconditional(after_if));
-
-        self.code.push(Opcode::JumpTarget);
-        self.code[jump_always] = Opcode::Jump {
-            idx: self.code.len(),
-        }
     }
 
     fn codegen_for_loop(
@@ -710,9 +647,9 @@ impl FunctionBuilder {
         init: Option<Node<ForInit>>,
         test: Option<Node<Expression>>,
         update: Option<Node<Expression>>,
-        header_scope: Scope,
+        _header_scope: Scope,
         body: Node<Statement>,
-        body_scope: Scope,
+        _body_scope: Scope,
     ) {
         let mut has_lexical_decls = false;
         if let Some(init) = init {
@@ -746,22 +683,12 @@ impl FunctionBuilder {
             }
         }
         if has_lexical_decls {
-            self.code.push(Opcode::CreatePerIterationEnvironment);
             self.cfg.add_op(Opcode::CreatePerIterationEnvironment);
         }
-        let loop_start_idx = self.code.len();
-        // Start of the loop
-        self.code.push(Opcode::JumpTarget);
         let test_block = self.cfg.new_successor_block();
-
-        // Index of the test's jump instruction. Needs to be edited after the loop
-        // body is codegenned so we can jump to the right exit point
-        let mut test_jump_idx = None;
 
         if let Some(test) = test {
             self.codegen_expression(test);
-            test_jump_idx = Some(self.code.len());
-            self.code.push(Opcode::Unreachable);
         }
 
         let loop_body = self.cfg.new_block();
@@ -772,9 +699,6 @@ impl FunctionBuilder {
             self.codegen_expression(update);
         }
 
-        self.code.push(Opcode::Jump {
-            idx: loop_start_idx,
-        });
         self.cfg
             .current_block()
             .set_terminator(Terminator::Unconditional(test_block));
@@ -785,13 +709,6 @@ impl FunctionBuilder {
                 yes: loop_body,
                 no: after,
             });
-
-        if let Some(idx) = test_jump_idx {
-            self.code[idx] = Opcode::JumpIfFalse {
-                idx: self.code.len(),
-            };
-        }
-        self.code.push(Opcode::JumpTarget);
     }
 
     /// Store the contents of the accumulator into the object in [`obj`]
@@ -799,7 +716,6 @@ impl FunctionBuilder {
     fn store_named_property(&mut self, obj: TemporaryIndex, name: Symbol) {
         let idx = self.add_name(name);
         let op = Opcode::StoreNamedProperty { obj, name: idx };
-        self.code.push(op);
         self.cfg.add_op(op);
     }
 
@@ -808,7 +724,6 @@ impl FunctionBuilder {
     fn store_temporary(&mut self) -> TemporaryIndex {
         let target = self.alloc_temporary();
         let op = Opcode::StoreAcc(target);
-        self.code.push(op);
         self.cfg.add_op(op);
         target
     }
@@ -816,7 +731,6 @@ impl FunctionBuilder {
     /// Load the content of a temporary into the accumulator
     fn load_temporary(&mut self, temp: TemporaryIndex) {
         let op = Opcode::LoadAcc(temp);
-        self.code.push(op);
         self.cfg.add_op(op);
     }
 
@@ -827,7 +741,6 @@ impl FunctionBuilder {
             from: temp,
             to: new,
         };
-        self.code.push(op);
         self.cfg.add_op(op);
         new
     }

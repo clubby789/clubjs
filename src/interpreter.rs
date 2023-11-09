@@ -144,12 +144,13 @@ impl ExecutionContext {
         }
     }
 
-    pub fn get_op(&self, index: usize) -> Option<Opcode<codegen::TemporaryIndex>> {
-        if let Some(f) = self.function.as_function() {
-            f.code().opcodes().get(index).copied()
+    pub fn get_op(&self, _index: usize) -> Option<Opcode<codegen::TemporaryIndex>> {
+        todo!()
+        /*if let Some(f) = self.function.as_function() {
+            f.code().cfg().get(index).copied()
         } else {
-            self.script.opcodes().get(index).copied()
-        }
+            self.script.cfg().get(index).copied()
+        }*/
     }
 
     pub fn get_scope(&self, index: usize) -> Scope {

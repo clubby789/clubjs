@@ -1,10 +1,7 @@
 use std::{
     cell::OnceCell,
     fmt::{Debug, Display, Formatter, Write},
-    sync,
 };
-
-use crate::intern::Symbol;
 
 use super::Opcode;
 
@@ -31,6 +28,10 @@ impl<TemporaryKind> BasicBlock<TemporaryKind> {
                 self.terminator.get().unwrap()
             )
         })
+    }
+
+    pub fn try_set_terminator(&self, terminator: Terminator) -> Result<(), Terminator> {
+        self.terminator.set(terminator)
     }
 
     pub fn add_op(&mut self, op: Opcode<TemporaryKind>) {
@@ -83,9 +84,15 @@ impl Display for Terminator {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ControlFlowGraph<TemporaryKind> {
     blocks: Vec<BasicBlock<TemporaryKind>>,
+}
+
+impl<TemporaryKind> Default for ControlFlowGraph<TemporaryKind> {
+    fn default() -> Self {
+        Self { blocks: vec![] }
+    }
 }
 
 impl<TemporaryKind: Display + Debug> Display for ControlFlowGraph<TemporaryKind> {
