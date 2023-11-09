@@ -612,34 +612,71 @@ impl FunctionBuilder {
         then: Node<Statement>,
         els: Option<Node<Statement>>,
     ) {
-        // TODO: make this non-recursive so we can have a single exit basic block
-        self.codegen_expression(test);
-        let test_block = self.cfg.current_idx();
-        let then_block = self.cfg.new_block();
+        let mut successors: Vec<(Option<Node<Expression>>, Node<Statement>)> = vec![];
+        let mut cur = els;
+        let mut has_unqualified_else = false;
+        while let Some(next) = cur {
+            if let StatementKind::If(..) = &next.kind {
+                // This is pretty bad, is there a better way to 'lazily move'?
+                let StatementKind::If(test, then, els, ..) = next.take().kind else {
+                    unreachable!()
+                };
+                successors.push((Some(test), *then));
+                cur = els.map(|b| *b);
+            } else {
+                if has_unqualified_else {
+                    panic!("multiple `else` blocks in a single if");
+                }
+                has_unqualified_else = true;
+                successors.push((None, next));
+                cur = None;
+            }
+        }
 
+        self.codegen_expression(test);
+        // Blocks beginning with an 'if' test
+        // Record these to later jump to the corresponding 'then', or after it
+        let mut test_blocks = vec![self.cfg.current_idx()];
+        // Blocks to be taken if 'test' is true
+        // Record these to later have them jump out of the whole if statement
+        let mut then_blocks = vec![self.cfg.new_block()];
         self.codegen_statement(then);
 
-        let after_then = self.cfg.new_block();
-
-        if let Some(els) = els {
-            self.codegen_statement(els);
-            let cur = self.cfg.current_idx();
-            let new = self.cfg.new_block();
-            self.cfg
-                .get_block(cur)
-                .set_terminator(Terminator::Unconditional(new));
+        for (test, body) in successors {
+            self.cfg.new_block();
+            if let Some(test) = test {
+                test_blocks.push(self.cfg.current_idx());
+                self.codegen_expression(test);
+                then_blocks.push(self.cfg.new_block());
+            }
+            self.codegen_statement(body);
         }
-        let after_if = self.cfg.current_idx();
-        self.cfg
-            .get_block(test_block)
-            .set_terminator(Terminator::Conditional {
-                yes: then_block,
-                no: after_then,
-            });
-
-        self.cfg
-            .get_block(then_block)
-            .set_terminator(Terminator::Unconditional(after_if));
+        let last_block = self.cfg.current_idx();
+        assert_eq!(test_blocks.len(), then_blocks.len());
+        let end = self.cfg.new_block();
+        for i in 0..test_blocks.len() {
+            let no_block = if let Some(b) = test_blocks.get(i + 1) {
+                *b
+            } else if has_unqualified_else {
+                last_block
+            } else {
+                end
+            };
+            self.cfg
+                .get_block(test_blocks[i])
+                .set_terminator(Terminator::Conditional {
+                    yes: then_blocks[i],
+                    no: no_block,
+                });
+            self.cfg
+                .get_block(then_blocks[i])
+                .set_terminator(Terminator::Unconditional(end));
+        }
+        if has_unqualified_else {
+            self.cfg
+                .get_block(last_block)
+                .set_terminator(Terminator::Unconditional(end));
+        }
     }
 
     fn codegen_for_loop(

@@ -44,11 +44,11 @@ impl<TemporaryKind: Display + Debug> Display for BasicBlock<TemporaryKind> {
         for op in &self.ops {
             write!(f, "    {op};\n")?;
         }
-        write!(
-            f,
-            "    {};",
-            self.terminator.get().unwrap_or(&Terminator::Unreachable)
-        )
+        if let Some(t) = self.terminator.get() {
+            write!(f, "    {t};")
+        } else {
+            write!(f, "    <no terminator>;")
+        }
     }
 }
 
