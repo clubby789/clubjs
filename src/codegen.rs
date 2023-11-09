@@ -2,6 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    fmt::{Debug, Display, Formatter},
     rc::Rc,
 };
 
@@ -17,6 +18,10 @@ use crate::{
     lex::{kw, Literal},
     span::Node,
 };
+
+use self::cfg::{ControlFlowGraph, Terminator};
+
+mod cfg;
 
 /// [`TemporaryKind`] will either be an incrementing counter or
 /// a register/memory reference after optimization`
@@ -115,8 +120,7 @@ pub enum Opcode<TemporaryKind> {
     /// lexical declarations
     // TODO: do bindings
     CreatePerIterationEnvironment,
-    #[cfg(debug_assertions)]
-    /// No-op, but when debug_assertions are enabled all jumps must land on a JumpTarget instruction
+    /// All jumps must land on a JumpTarget instruction
     JumpTarget,
     /// Set the pc to the given index
     Jump { idx: usize },
@@ -125,6 +129,12 @@ pub enum Opcode<TemporaryKind> {
 
     /// Placeholder opcode used only during codegen. Should never be reached
     Unreachable,
+}
+
+impl<TemporaryKind: Display + Debug> Display for Opcode<TemporaryKind> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self, f)
+    }
 }
 
 pub type TemporaryIndex = usize;
@@ -266,6 +276,7 @@ pub enum Declaration {
 #[derive(Default)]
 pub struct FunctionBuilder {
     code: Vec<Opcode<TemporaryIndex>>,
+    cfg: ControlFlowGraph<TemporaryIndex>,
     anon_functions: Vec<Rc<Function>>,
     functions: HashMap<Symbol, Rc<Function>>,
     /// Holds the next temporary index to use,
@@ -284,9 +295,12 @@ impl FunctionBuilder {
             ..Default::default()
         };
         let Block { statements, scope } = script.take().body;
+        // TODO: remove the linear codegen
+        f.cfg.new_block();
         for stmt in statements {
             f.codegen_statement(stmt)
         }
+        println!("{}", f.cfg);
         Script {
             code: f.code,
             anon_functions: f.anon_functions,
@@ -310,6 +324,7 @@ impl FunctionBuilder {
             body: Block { statements, scope },
             ..
         } = func.take();
+        f.cfg.new_block();
         for stmt in statements {
             f.codegen_statement(stmt)
         }
@@ -339,7 +354,10 @@ impl FunctionBuilder {
     fn codegen_statement(&mut self, stmt: Node<Statement>) {
         match stmt.take().kind {
             StatementKind::Empty => (),
-            StatementKind::Debugger => self.code.push(Opcode::Debugger),
+            StatementKind::Debugger => {
+                self.code.push(Opcode::Debugger);
+                self.cfg.add_op(Opcode::Debugger);
+            }
             StatementKind::Block(block) => self.codegen_block(block),
             StatementKind::Expression(expr) => self.codegen_expression(expr),
             StatementKind::If(test, then, els, _) => self.codegen_if(test, *then, els.map(|b| *b)),
@@ -350,14 +368,21 @@ impl FunctionBuilder {
             StatementKind::Return(expr) => {
                 if let Some(e) = expr {
                     self.codegen_expression(e);
-                    self.code.push(Opcode::Return { value: true })
+                    self.code.push(Opcode::Return { value: true });
+                    self.cfg
+                        .current_block()
+                        .set_terminator(cfg::Terminator::Return { value: true });
                 } else {
-                    self.code.push(Opcode::Return { value: false })
+                    self.code.push(Opcode::Return { value: false });
+                    self.cfg
+                        .current_block()
+                        .set_terminator(cfg::Terminator::Return { value: false });
                 }
             }
             StatementKind::Throw(expr) => {
                 self.codegen_expression(expr);
                 self.code.push(Opcode::Throw);
+                todo!("basic block terminator for Throw")
             }
             StatementKind::Try(_, _, _) => todo!(),
             StatementKind::While(_, _) => todo!(),
@@ -396,31 +421,41 @@ impl FunctionBuilder {
     }
 
     fn codegen_block(&mut self, block: Block) {
-        self.code.push(Opcode::EnterBlock {
+        let op = Opcode::EnterBlock {
             scope: self.scopes.len(),
-        });
+        };
+        self.code.push(op);
+        self.cfg.add_op(op);
         self.scopes.push(block.scope);
         for stmt in block.statements {
             self.codegen_statement(stmt);
         }
         self.code.push(Opcode::LeaveBlock);
+        self.cfg.add_op(Opcode::LeaveBlock);
     }
 
     /// Evaluate the given expression, storing the result in the accumulator
     fn codegen_expression(&mut self, expr: Node<Expression>) {
         match expr.take().kind {
-            ExpressionKind::This => self.code.push(Opcode::LoadThis),
+            ExpressionKind::This => {
+                self.code.push(Opcode::LoadThis);
+                self.cfg.add_op(Opcode::LoadThis);
+            }
             ExpressionKind::Array(exprs) => {
                 self.code.push(Opcode::CreateArray);
+                self.cfg.add_op(Opcode::CreateArray);
                 let arr = self.store_temporary();
                 for (idx, expr) in exprs.into_iter().enumerate() {
                     self.codegen_expression(expr);
-                    self.code.push(Opcode::StoreInArrayIdx { arr, idx })
+                    let op = Opcode::StoreInArrayIdx { arr, idx };
+                    self.code.push(op);
+                    self.cfg.add_op(op);
                 }
                 self.load_temporary(arr)
             }
             ExpressionKind::Object(props) => {
                 self.code.push(Opcode::CreateObject);
+                self.cfg.add_op(Opcode::CreateObject);
                 let obj = self.store_temporary();
                 for (name, node) in props.into_iter() {
                     if let Some(init) = node {
@@ -437,7 +472,9 @@ impl FunctionBuilder {
                 let f = Self::codegen_function(func);
                 let idx = self.anon_functions.len();
                 self.anon_functions.push(Rc::new(f));
-                self.code.push(Opcode::LoadFunc(idx));
+                let op = Opcode::LoadFunc(idx);
+                self.code.push(op);
+                self.cfg.add_op(op);
             }
             ExpressionKind::Arrow(_) => todo!(),
             ExpressionKind::Unary(_, _) => todo!(),
@@ -457,11 +494,13 @@ impl FunctionBuilder {
                     .map(|expr| self.codegen_expression_to_temporary(expr))
                     .collect();
                 self.load_temporary(func);
-                match args.as_slice() {
-                    [] => self.code.push(Opcode::Construct0),
-                    &[a] => self.code.push(Opcode::Construct1(a)),
+                let op = match args.as_slice() {
+                    [] => Opcode::Construct0,
+                    &[a] => Opcode::Construct1(a),
                     _ => todo!("construcing length {}", args.len()),
-                }
+                };
+                self.code.push(op);
+                self.cfg.add_op(op);
             }
             ExpressionKind::Delete(_) => todo!(),
             ExpressionKind::Call(target, args) => {
@@ -471,26 +510,32 @@ impl FunctionBuilder {
                     .map(|expr| self.codegen_expression_to_temporary(expr))
                     .collect();
                 self.load_temporary(func);
-                match args.as_slice() {
-                    [] => self.code.push(Opcode::Call0),
-                    &[a] => self.code.push(Opcode::Call1(a)),
+                let op = match args.as_slice() {
+                    [] => Opcode::Call0,
+                    &[a] => Opcode::Call1(a),
                     _ => todo!("calling length {}", args.len()),
-                }
+                };
+                self.code.push(op);
+                self.cfg.add_op(op);
             }
             ExpressionKind::Member(base, key) => {
                 let base = self.codegen_expression_to_temporary(*base);
                 match key {
                     MemberKey::Static(name) => {
                         let name = self.add_name(name);
-                        self.code.push(Opcode::GetNamedProperty { obj: base, name })
+                        let op = Opcode::GetNamedProperty { obj: base, name };
+                        self.code.push(op);
+                        self.cfg.add_op(op);
                     }
                     MemberKey::Computed(expr) => {
                         self.codegen_expression(*expr);
                         let expr = self.store_temporary();
-                        self.code.push(Opcode::GetComputedProperty {
+                        let op = Opcode::GetComputedProperty {
                             obj: base,
                             index: expr,
-                        })
+                        };
+                        self.code.push(op);
+                        self.cfg.add_op(op);
                     }
                 }
             }
@@ -498,7 +543,9 @@ impl FunctionBuilder {
             ExpressionKind::Literal(_) => todo!(),
             ExpressionKind::Identifier(ident) => {
                 let name = self.add_name(ident);
-                self.code.push(Opcode::LoadIdent(name))
+                let op = Opcode::LoadIdent(name);
+                self.code.push(op);
+                self.cfg.add_op(op);
             }
         }
     }
@@ -511,13 +558,15 @@ impl FunctionBuilder {
     }
 
     fn codegen_literal(&mut self, lit: Literal) {
-        match lit {
-            Literal::Integer(n) => self.code.push(Opcode::LoadInt(n)),
+        let op = match lit {
+            Literal::Integer(n) => Opcode::LoadInt(n),
             Literal::String(s) => {
                 let idx = self.add_string(s);
-                self.code.push(Opcode::LoadString(idx))
+                Opcode::LoadString(idx)
             }
-        }
+        };
+        self.code.push(op);
+        self.cfg.add_op(op);
     }
 
     /// Evaluate first the left, then right expression, then perform
@@ -541,6 +590,7 @@ impl FunctionBuilder {
             o => todo!("`{o:?}`"),
         };
         self.code.push(op);
+        self.cfg.add_op(op);
     }
 
     /// Evaluate first the left, then right expression, then assign the right value
@@ -577,6 +627,7 @@ impl FunctionBuilder {
             ),
         };
         self.code.push(op);
+        self.cfg.add_op(op);
     }
 
     fn codegen_variable_declaration(&mut self, decl: Node<VariableDeclaration>) {
@@ -589,11 +640,13 @@ impl FunctionBuilder {
             self.bound_names.insert(declr.name, decl.kind);
             if let Some(init) = declr.init {
                 self.codegen_expression(init);
-                if decl.kind.lexical() {
-                    self.code.push(Opcode::InitializeIdent { name: name_idx })
+                let op = if decl.kind.lexical() {
+                    Opcode::InitializeIdent { name: name_idx }
                 } else {
-                    self.code.push(Opcode::StoreIdent { name: name_idx })
-                }
+                    Opcode::StoreIdent { name: name_idx }
+                };
+                self.code.push(op);
+                self.cfg.add_op(op);
             }
         }
     }
@@ -604,10 +657,15 @@ impl FunctionBuilder {
         then: Node<Statement>,
         els: Option<Node<Statement>>,
     ) {
+        // TODO: make this non-recursive so we can have a single exit basic block
         self.codegen_expression(test);
         let jump_false = self.code.len();
         // Change to JumpIfFalse after we codegen the body
         self.code.push(Opcode::Unreachable);
+
+        let test_block = self.cfg.current_idx();
+        let then_block = self.cfg.new_block();
+
         self.codegen_statement(then);
         // After we codegen all (if any) else blocks, we'll need to jump over them
         let jump_always = self.code.len();
@@ -616,12 +674,31 @@ impl FunctionBuilder {
         self.code[jump_false] = Opcode::JumpIfFalse {
             idx: self.code.len(),
         };
-        #[cfg(debug_assertions)]
+
         self.code.push(Opcode::JumpTarget);
+
+        let after_then = self.cfg.new_block();
+
         if let Some(els) = els {
             self.codegen_statement(els);
+            let cur = self.cfg.current_idx();
+            let new = self.cfg.new_block();
+            self.cfg
+                .get_block(cur)
+                .set_terminator(Terminator::Unconditional(new));
         }
-        #[cfg(debug_assertions)]
+        let after_if = self.cfg.current_idx();
+        self.cfg
+            .get_block(test_block)
+            .set_terminator(Terminator::Conditional {
+                yes: then_block,
+                no: after_then,
+            });
+
+        self.cfg
+            .get_block(then_block)
+            .set_terminator(Terminator::Unconditional(after_if));
+
         self.code.push(Opcode::JumpTarget);
         self.code[jump_always] = Opcode::Jump {
             idx: self.code.len(),
@@ -670,11 +747,12 @@ impl FunctionBuilder {
         }
         if has_lexical_decls {
             self.code.push(Opcode::CreatePerIterationEnvironment);
+            self.cfg.add_op(Opcode::CreatePerIterationEnvironment);
         }
         let loop_start_idx = self.code.len();
         // Start of the loop
-        #[cfg(debug_assertions)]
         self.code.push(Opcode::JumpTarget);
+        let test_block = self.cfg.new_successor_block();
 
         // Index of the test's jump instruction. Needs to be edited after the loop
         // body is codegenned so we can jump to the right exit point
@@ -686,6 +764,7 @@ impl FunctionBuilder {
             self.code.push(Opcode::Unreachable);
         }
 
+        let loop_body = self.cfg.new_block();
         self.codegen_statement(body);
         // TODO: handle break, continue
 
@@ -696,13 +775,22 @@ impl FunctionBuilder {
         self.code.push(Opcode::Jump {
             idx: loop_start_idx,
         });
+        self.cfg
+            .current_block()
+            .set_terminator(Terminator::Unconditional(test_block));
+        let after = self.cfg.new_block();
+        self.cfg
+            .get_block(test_block)
+            .set_terminator(Terminator::Conditional {
+                yes: loop_body,
+                no: after,
+            });
 
         if let Some(idx) = test_jump_idx {
             self.code[idx] = Opcode::JumpIfFalse {
                 idx: self.code.len(),
             };
         }
-        #[cfg(debug_assertions)]
         self.code.push(Opcode::JumpTarget);
     }
 
@@ -710,30 +798,37 @@ impl FunctionBuilder {
     /// with the property named [`name`]
     fn store_named_property(&mut self, obj: TemporaryIndex, name: Symbol) {
         let idx = self.add_name(name);
-        self.code
-            .push(Opcode::StoreNamedProperty { obj, name: idx })
+        let op = Opcode::StoreNamedProperty { obj, name: idx };
+        self.code.push(op);
+        self.cfg.add_op(op);
     }
 
     /// Store the current contents of the accumulator into
     /// a new temporary
     fn store_temporary(&mut self) -> TemporaryIndex {
         let target = self.alloc_temporary();
-        self.code.push(Opcode::StoreAcc(target));
+        let op = Opcode::StoreAcc(target);
+        self.code.push(op);
+        self.cfg.add_op(op);
         target
     }
 
     /// Load the content of a temporary into the accumulator
     fn load_temporary(&mut self, temp: TemporaryIndex) {
-        self.code.push(Opcode::LoadAcc(temp));
+        let op = Opcode::LoadAcc(temp);
+        self.code.push(op);
+        self.cfg.add_op(op);
     }
 
     /// Shallow copy a register
     fn copy(&mut self, temp: TemporaryIndex) -> TemporaryIndex {
         let new = self.alloc_temporary();
-        self.code.push(Opcode::Move {
+        let op = Opcode::Move {
             from: temp,
             to: new,
-        });
+        };
+        self.code.push(op);
+        self.cfg.add_op(op);
         new
     }
 

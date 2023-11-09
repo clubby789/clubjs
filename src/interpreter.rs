@@ -2,7 +2,7 @@ use crate::{
     ast::{self, Scope},
     codegen::{self, Declaration, Opcode, ScopeAnalysis, Script},
     intern::Symbol,
-    lex::{self, kw},
+    lex::kw,
     span::Node,
 };
 use either::Either;
@@ -645,17 +645,14 @@ impl Agent {
             Opcode::CreatePerIterationEnvironment => {
                 // TODO: if we have lexical declarations we need to bind them
             }
-            #[cfg(debug_assertions)]
             Opcode::JumpTarget => (),
             Opcode::Jump { idx } => {
-                #[cfg(debug_assertions)]
                 if ctx.get_op(idx) != Some(Opcode::JumpTarget) {
                     panic!("jump to invalid location {idx}");
                 }
                 ctx.state.pc.set(idx);
             }
             Opcode::JumpIfFalse { idx } => {
-                #[cfg(debug_assertions)]
                 if ctx.get_op(idx) != Some(Opcode::JumpTarget) {
                     panic!("jump to invalid location {idx}");
                 }
