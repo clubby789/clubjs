@@ -248,7 +248,10 @@ impl ExecutionContext {
         for (dn, _) in function_code.lexically_scoped_declarations() {
             lex_env.create_mutable_binding(dn, false);
         }
-        assert!(function_names.is_empty(), "nested functions not yet supported");
+        assert!(
+            function_names.is_empty(),
+            "nested functions not yet supported"
+        );
     }
 }
 

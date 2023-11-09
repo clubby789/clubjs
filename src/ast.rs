@@ -288,7 +288,7 @@ pub enum ExpressionKind {
         consequent: Box<Node<Expression>>,
         alternate: Box<Node<Expression>>,
     },
-    New(Box<Node<Expression>>),
+    New(Box<Node<Expression>>, Vec<Node<Expression>>),
     Delete(Box<Node<Expression>>),
     Call(Box<Node<Expression>>, Vec<Node<Expression>>),
     Member(Box<Node<Expression>>, MemberKey),
@@ -1396,11 +1396,16 @@ impl<'a> Parser<'a> {
 
     fn parse_new(&mut self) -> Node<Expression> {
         let start = self.prev_token.span();
-        let target = self.parse_expression_precedence(Precedence::CALL);
-
+        let target = self.parse_expression_precedence(Precedence::GROUPING.next());
+        let args = if self.eat(TokenKind::LParen) {
+            self.parse_delimited_list(TokenKind::Comma, Self::try_parse_expression)
+        } else {
+            vec![]
+        };
+        self.expect(TokenKind::RParen);
         self.alloc_node(
             Expression {
-                kind: ExpressionKind::New(Box::new(target)),
+                kind: ExpressionKind::New(Box::new(target), args),
             },
             start.to(self.prev_token.span()),
         )

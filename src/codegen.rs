@@ -91,6 +91,10 @@ pub enum Opcode<TemporaryKind> {
     Call0,
     /// Call the function in the accumulator with the arg in the given temporary
     Call1(TemporaryKind),
+    /// Construct the object in the accumulator with no args
+    Construct0,
+    /// Construct the object in the accumulator with the arg in the given temporary
+    Construct1(TemporaryKind),
     /// Resolve the given name in the environment, loading a
     /// [`crate::interpreter::value::JSValue::Reference`] into the accumulator
     LoadIdent(NameIndex),
@@ -446,7 +450,19 @@ impl FunctionBuilder {
                 consequent,
                 alternate,
             } => todo!(),
-            ExpressionKind::New(_) => todo!(),
+            ExpressionKind::New(target, args) => {
+                let func = self.codegen_expression_to_temporary(*target);
+                let args: Vec<_> = args
+                    .into_iter()
+                    .map(|expr| self.codegen_expression_to_temporary(expr))
+                    .collect();
+                self.load_temporary(func);
+                match args.as_slice() {
+                    [] => self.code.push(Opcode::Construct0),
+                    &[a] => self.code.push(Opcode::Construct1(a)),
+                    _ => todo!("construcing length {}", args.len()),
+                }
+            }
             ExpressionKind::Delete(_) => todo!(),
             ExpressionKind::Call(target, args) => {
                 let func = self.codegen_expression_to_temporary(*target);
