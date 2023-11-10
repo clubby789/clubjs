@@ -3,6 +3,8 @@ use std::{
     fmt::{Debug, Display, Formatter, Write},
 };
 
+use either::Either;
+
 use super::Opcode;
 
 pub type BasicBlockIndex = usize;
@@ -52,7 +54,7 @@ impl<TemporaryKind: Display + Debug> Display for BasicBlock<TemporaryKind> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Terminator {
     /// Always jumps to the given [`BasicBlock`]
     Unconditional(BasicBlockIndex),
@@ -67,7 +69,7 @@ pub enum Terminator {
     Return {
         value: bool,
     },
-    Unreachable,
+    EndScript,
 }
 
 impl Display for Terminator {
@@ -79,7 +81,7 @@ impl Display for Terminator {
             }
             Terminator::Return { value: true } => f.write_str("return acc"),
             Terminator::Return { value: false } => f.write_str("return"),
-            Terminator::Unreachable => f.write_str("unreachable"),
+            Terminator::EndScript => f.write_str("<end of script>"),
         }
     }
 }
@@ -105,13 +107,7 @@ impl<TemporaryKind: Display + Debug> Display for ControlFlowGraph<TemporaryKind>
     }
 }
 
-impl<TemporaryKind> ControlFlowGraph<TemporaryKind> {
-    pub fn new() -> Self {
-        Self {
-            blocks: Default::default(),
-        }
-    }
-
+impl<TemporaryKind: Copy> ControlFlowGraph<TemporaryKind> {
     pub fn new_block(&mut self) -> BasicBlockIndex {
         let idx = self.blocks.len();
         self.blocks.push(BasicBlock::new());
@@ -132,8 +128,12 @@ impl<TemporaryKind> ControlFlowGraph<TemporaryKind> {
         self.current_block().ops.push(op);
     }
 
-    pub fn get_block(&mut self, index: BasicBlockIndex) -> &mut BasicBlock<TemporaryKind> {
+    pub fn get_block_mut(&mut self, index: BasicBlockIndex) -> &mut BasicBlock<TemporaryKind> {
         &mut self.blocks[index]
+    }
+
+    pub fn get_block(&self, index: BasicBlockIndex) -> &BasicBlock<TemporaryKind> {
+        &self.blocks[index]
     }
 
     pub fn current_block(&mut self) -> &mut BasicBlock<TemporaryKind> {
@@ -142,5 +142,24 @@ impl<TemporaryKind> ControlFlowGraph<TemporaryKind> {
 
     pub fn current_idx(&mut self) -> BasicBlockIndex {
         self.blocks.len().checked_sub(1).expect("no current blocks")
+    }
+
+    /// Get a given [`Opcode`] from a given [`BasicBlock`], or a [`Terminator`] if the end of the block has been reached
+    pub fn get(
+        &self,
+        bb: BasicBlockIndex,
+        insn: usize,
+    ) -> Either<Opcode<TemporaryKind>, Terminator> {
+        let block = self.get_block(bb);
+        if insn < block.ops.len() {
+            Either::Left(block.ops[insn])
+        } else if insn == block.ops.len() {
+            Either::Right(*block.terminator.get().expect("terminator not set"))
+        } else {
+            panic!(
+                "basic block {bb} has {} insns and 1 terminator, {insn} is out of bounds",
+                block.ops.len()
+            )
+        }
     }
 }

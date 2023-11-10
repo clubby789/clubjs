@@ -1,6 +1,10 @@
 use crate::{
     ast::{self, Scope},
-    codegen::{self, Declaration, Opcode, ScopeAnalysis, Script},
+    codegen::{
+        self,
+        cfg::{BasicBlockIndex, Terminator},
+        Declaration, Opcode, ScopeAnalysis, Script, TemporaryIndex,
+    },
     intern::Symbol,
     lex::kw,
     span::Node,
@@ -144,13 +148,13 @@ impl ExecutionContext {
         }
     }
 
-    pub fn get_op(&self, _index: usize) -> Option<Opcode<codegen::TemporaryIndex>> {
-        todo!()
-        /*if let Some(f) = self.function.as_function() {
-            f.code().cfg().get(index).copied()
+    pub fn get_current_op(&self) -> Either<Opcode<TemporaryIndex>, Terminator> {
+        let (bb, insn) = (self.state.basic_block.get(), self.state.insn.get());
+        if let Some(f) = self.function.as_function() {
+            f.code().cfg().get(bb, insn)
         } else {
-            self.script.cfg().get(index).copied()
-        }*/
+            self.script.cfg().get(bb, insn)
+        }
     }
 
     pub fn get_scope(&self, index: usize) -> Scope {
@@ -259,15 +263,18 @@ impl ExecutionContext {
 pub const REG_COUNT: usize = 255;
 /// Interpreter state associated with a specific execution context
 struct VmState {
-    pc: Cell<usize>,
+    /// The current [`BasicBlockIndex`] being operated on
+    basic_block: Cell<BasicBlockIndex>,
+    /// The index of the current instruction within [`Self::basic_block`]
+    insn: Cell<usize>,
     acc: Cell<JSValue>,
     regs: [Cell<JSValue>; REG_COUNT],
 }
 
 impl VmState {
     pub fn inc_pc(&self) -> usize {
-        let old = self.pc.get();
-        self.pc.set(old + 1);
+        let old = self.insn.get();
+        self.insn.set(old + 1);
         old + 1
     }
 
@@ -301,7 +308,8 @@ impl Default for VmState {
         // value
         const NULL: Cell<JSValue> = Cell::new(JSValue::null());
         Self {
-            pc: Default::default(),
+            basic_block: Default::default(),
+            insn: Default::default(),
             acc: NULL,
             regs: [NULL; 255],
         }
@@ -339,7 +347,7 @@ pub struct Agent {
 }
 
 pub struct ScriptRecord {
-    realm: Shared<Realm>,
+    // realm: Shared<Realm>,
     pub ecma_script_code: Node<ast::Program>,
 }
 
@@ -363,23 +371,6 @@ impl Agent {
         realm.set_agent(Rc::downgrade(&agent));
         realm.set_custom_global_bindings();
         agent
-    }
-
-    /// Reset the state of the agent by creating a new [`Realm`]
-    pub fn reset(self: &Rc<Self>) {
-        let realm = Shared::new(Realm::new());
-        let outer_ctx = ExecutionContext::from_realm(
-            realm.clone(),
-            EnvironmentRecord::default(),
-            EnvironmentRecord::default(),
-            Rc::new(Script::default()),
-        );
-        realm.set_global_object(None, None);
-        realm.set_default_global_bindings();
-        realm.set_agent(Rc::downgrade(&self));
-        realm.set_custom_global_bindings();
-        *self.realm.borrow_mut() = realm;
-        *self.contexts.borrow_mut() = vec![outer_ctx];
     }
 
     fn current_context(&self) -> Ref<'_, ExecutionContext> {
@@ -415,7 +406,7 @@ impl Agent {
     pub fn parse_script(&self, source: &str, path: PathBuf) -> ScriptRecord {
         ScriptRecord {
             ecma_script_code: ast::Parser::new(source, path).parse(),
-            realm: self.current_context().realm.clone(),
+            // realm: self.current_context().realm.clone(),
         }
     }
 
@@ -494,9 +485,14 @@ impl Agent {
 
     fn step(&self) -> bool {
         let ctx = self.current_context();
-        let Some(op) = ctx.get_op(ctx.state.pc.get()) else {
-            return false;
+        let op = match ctx.get_current_op() {
+            Either::Left(op) => op,
+            Either::Right(term) => {
+                drop(ctx);
+                return self.do_terminator(term);
+            }
         };
+
         ctx.state.inc_pc();
 
         match op {
@@ -633,34 +629,8 @@ impl Agent {
                 ));
                 ctx.state.set_acc(JSValue::object(Shared::new(res)));
             }
-            Opcode::Return { value } => {
-                let return_value = if value {
-                    ctx.state.acc.take()
-                } else {
-                    JSValue::undefined()
-                };
-                drop(ctx);
-                self.realm.borrow().pop_execution_context();
-                self.current_context().state.acc.set(return_value);
-            }
             Opcode::CreatePerIterationEnvironment => {
                 // TODO: if we have lexical declarations we need to bind them
-            }
-            Opcode::JumpTarget => (),
-            Opcode::Jump { idx } => {
-                if ctx.get_op(idx) != Some(Opcode::JumpTarget) {
-                    panic!("jump to invalid location {idx}");
-                }
-                ctx.state.pc.set(idx);
-            }
-            Opcode::JumpIfFalse { idx } => {
-                if ctx.get_op(idx) != Some(Opcode::JumpTarget) {
-                    panic!("jump to invalid location {idx}");
-                }
-                let val = ctx.state.acc.take();
-                if !val.get_value().to_boolean() {
-                    ctx.state.pc.set(idx);
-                }
             }
             Opcode::EnterBlock { scope } => {
                 let block_env =
@@ -688,6 +658,37 @@ impl Agent {
                 self.current_context_mut().lexical_environment = env;
             }
             o => todo!("{o:?} not implemented"),
+        }
+        true
+    }
+
+    fn do_terminator(&self, term: Terminator) -> bool {
+        let ctx = self.current_context();
+        match term {
+            Terminator::Unconditional(bb) => {
+                ctx.state.basic_block.set(bb);
+                ctx.state.insn.set(0);
+            }
+            Terminator::Conditional { yes, no } => {
+                let val = ctx.state.acc.take();
+                if val.get_value().to_boolean() {
+                    ctx.state.basic_block.set(yes);
+                } else {
+                    ctx.state.basic_block.set(no);
+                }
+                ctx.state.insn.set(0);
+            }
+            Terminator::Return { value } => {
+                let ret = if value {
+                    ctx.state.acc.take()
+                } else {
+                    JSValue::undefined()
+                };
+                drop(ctx);
+                self.realm.borrow().pop_execution_context();
+                self.current_context().state.acc.set(ret);
+            }
+            Terminator::EndScript => return false,
         }
         true
     }

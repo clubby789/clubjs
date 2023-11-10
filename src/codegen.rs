@@ -18,7 +18,7 @@ use crate::{
 
 use self::cfg::{ControlFlowGraph, Terminator};
 
-mod cfg;
+pub mod cfg;
 
 /// [`TemporaryKind`] will either be an incrementing counter or
 /// a register/memory reference after optimization`
@@ -29,14 +29,8 @@ pub enum Opcode<TemporaryKind> {
     EnterBlock { scope: ScopeIndex },
     /// Restores the previous LexcialEnvironment in the running context
     LeaveBlock,
-    /// Throw an exception. Right now, this just panics
-    Throw,
     /// Trigger the debugger
     Debugger,
-    /// Return from the running function. If [`value`] is true,
-    /// in the accumulator is used as the return value,
-    /// and placed into the previous execution context's accumulator.
-    Return { value: bool },
     /// Load <this> into the accumulator
     LoadThis,
     /// Create an empty array in the accumulator
@@ -118,15 +112,6 @@ pub enum Opcode<TemporaryKind> {
     /// lexical declarations
     // TODO: do bindings
     CreatePerIterationEnvironment,
-    /// All jumps must land on a JumpTarget instruction
-    JumpTarget,
-    /// Set the pc to the given index
-    Jump { idx: usize },
-    /// If `ToBoolean(GetValue(accumulator))` is false, set the pc to the given index
-    JumpIfFalse { idx: usize },
-
-    /// Placeholder opcode used only during codegen. Should never be reached
-    Unreachable,
 }
 
 impl<TemporaryKind: Display + Debug> Display for Opcode<TemporaryKind> {
@@ -294,7 +279,7 @@ impl FunctionBuilder {
         for stmt in statements {
             f.codegen_statement(stmt)
         }
-        println!("{}", f.cfg);
+        f.cfg.current_block().set_terminator(Terminator::EndScript);
         Script {
             cfg: f.cfg,
             anon_functions: f.anon_functions,
@@ -663,18 +648,18 @@ impl FunctionBuilder {
                 end
             };
             self.cfg
-                .get_block(test_blocks[i])
+                .get_block_mut(test_blocks[i])
                 .set_terminator(Terminator::Conditional {
                     yes: then_blocks[i],
                     no: no_block,
                 });
             self.cfg
-                .get_block(then_blocks[i])
+                .get_block_mut(then_blocks[i])
                 .set_terminator(Terminator::Unconditional(end));
         }
         if has_unqualified_else {
             self.cfg
-                .get_block(last_block)
+                .get_block_mut(last_block)
                 .set_terminator(Terminator::Unconditional(end));
         }
     }
@@ -741,7 +726,7 @@ impl FunctionBuilder {
             .set_terminator(Terminator::Unconditional(test_block));
         let after = self.cfg.new_block();
         self.cfg
-            .get_block(test_block)
+            .get_block_mut(test_block)
             .set_terminator(Terminator::Conditional {
                 yes: loop_body,
                 no: after,
